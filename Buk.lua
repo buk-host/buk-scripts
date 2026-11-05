@@ -5,7 +5,7 @@
     ║  UI: WindUI                          ║
     ╚══════════════════════════════════════╝
 
-    Abas: Main | Player | ESP | Weapon | Auto Farm | Aimbot MM2 | Troll | Settings
+    Abas: Main | Player | Auto Farm | ESP | Weapon | Aimbot MM2 | Troll | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
     Celular: minimize a janela e use o botão "BUK" (arrastável) para abrir de novo
 ]]
@@ -31,7 +31,6 @@ local Workspace         = game:GetService("Workspace")
 local UserInputService  = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService      = game:GetService("TweenService")
-local CollectionService = game:GetService("CollectionService")
 local HttpService       = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -131,10 +130,10 @@ local STR = {
         pick_key = "Shortcut Key", pick_cap = "GUN",
         sec_farm = "Farm Coins", farm_on = "Auto Farm", farm_limit = "Max Coins per Round",
         farm_safe = "Safe Mode", farm_reset = "Reset When Full",
+        farm_under = "Underground Farm",
         sec_magic = "Magic Bullet", magic = "Magic Bullet",
         magic_part = "Aim Part", part_torso = "Torso", part_head = "Head",
         magic_predict = "Prediction (ping compensation)",
-        sec_wall = "Shoot Through Walls", wall_shot = "Shoot Through Walls",
         sec_autopick = "Auto Pick", autopick_gun = "Auto Pick Dropped Gun",
         sec_fling = "Fling", fling = "Fling", fling_player = "Select Player",
         fling_notarget = "Select a player first.", fling_dead = "You need to be alive.",
@@ -200,7 +199,6 @@ local State = {
 
     -- Sheriff
     MagicBullet = false,
-    WallShot    = false,
     AimPart     = "Torso",
     AimPredict  = true,
     AutoPickGun = false,
@@ -208,6 +206,7 @@ local State = {
     -- Auto Farm
     FarmOn    = false,
     FarmSpeed = 22, -- fixo (sem slider)
+    FarmUnder = true, -- true: anda por BAIXO do mapa e sobe só pra pegar a moeda
     FarmSafe  = true,
     FarmLimit = 40,
     FarmReset = false,
@@ -360,8 +359,8 @@ local SAVE_KEYS = {
     "RoleInnocent", "RoleSheriff", "RoleMurderer", "EspName", "GunDrop", "ArrowMurder", "ArrowSheriff",
     "PickAuto", "PickButton", "PickKeyOn",
     "CFrameOn", "CFrameSpeed", "InfJump", "Noclip", "AntiFling",
-    "MagicBullet", "WallShot", "AimPart", "AimPredict", "AutoPickGun",
-    "FarmSafe", "FarmLimit", "FarmReset",
+    "MagicBullet", "AimPart", "AimPredict", "AutoPickGun",
+    "FarmSafe", "FarmLimit", "FarmReset", "FarmUnder",
 }
 
 local function saveConfig()
@@ -498,7 +497,7 @@ end
 local function roleDataNeeded()
     return rolesNeeded()
         or State.ArrowMurder or State.ArrowSheriff
-        or State.MagicBullet or State.WallShot or State.AutoPickGun
+        or State.MagicBullet or State.AutoPickGun
         or State.FarmOn
         or (State.Fling and type(State.FlingTarget) == "string" and State.FlingTarget:sub(1, 1) == "[")
 end
@@ -717,8 +716,81 @@ local function removePlayer(player)
     end
 end
 
--- Esp Name: pílula com o nome e a distância acima da cabeça
--- (a borda ganha a cor do role só se o ESP desse role estiver ligado)
+-- Esp Name: cartão com bolinha (cor do role), nome e distância.
+-- Fica bem ACIMA da cabeça: sobe NAME_STUDS_UP studs e ainda ganha uma folga fixa
+-- em pixels (NAME_GAP_PX), então não cola na cabeça nem de perto nem de longe.
+-- (a borda e a bolinha ganham a cor do role só se o ESP desse role estiver ligado)
+local NAME_STUDS_UP = 2.6
+local NAME_GAP_PX   = 8
+local NAME_H        = 28
+
+local function makeNameTag(accent)
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "NameTag"
+    gui.AlwaysOnTop = true
+    gui.Size = UDim2.fromOffset(300, 100)
+    gui.StudsOffset = Vector3.new(0, NAME_STUDS_UP, 0)
+    gui.Parent = HighlightFolder
+
+    -- o cartão nasce com a base um pouco acima do centro do billboard e cresce pra cima
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 1)
+    card.Position = UDim2.new(0.5, 0, 0.5, -NAME_GAP_PX)
+    card.Size = UDim2.fromOffset(0, NAME_H)
+    card.AutomaticSize = Enum.AutomaticSize.X
+    card.BackgroundColor3 = Color3.fromRGB(14, 14, 20)
+    card.BackgroundTransparency = 0.12
+    card.BorderSizePixel = 0
+    card.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, NAME_H / 2)
+    corner.Parent = card
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = accent
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.15
+    stroke.Parent = card
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 11)
+    pad.PaddingRight = UDim.new(0, 13)
+    pad.Parent = card
+
+    local list = Instance.new("UIListLayout")
+    list.FillDirection = Enum.FillDirection.Horizontal
+    list.VerticalAlignment = Enum.VerticalAlignment.Center
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding = UDim.new(0, 7)
+    list.Parent = card
+
+    local dot = Instance.new("Frame")
+    dot.LayoutOrder = 1
+    dot.Size = UDim2.fromOffset(8, 8)
+    dot.BackgroundColor3 = accent
+    dot.BorderSizePixel = 0
+    dot.Parent = card
+
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent = dot
+
+    local label = Instance.new("TextLabel")
+    label.LayoutOrder = 2
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.fromOffset(0, NAME_H)
+    label.AutomaticSize = Enum.AutomaticSize.X
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.TextColor3 = WHITE
+    label.RichText = true
+    label.Text = ""
+    label.Parent = card
+
+    return gui, label, stroke, dot
+end
+
 local function updateNameTag(player, char, show, role, dist)
     local t = nameTags[player]
 
@@ -732,8 +804,8 @@ local function updateNameTag(player, char, show, role, dist)
         if t then
             pcall(function() t.gui:Destroy() end)
         end
-        local gui, label, stroke = makePillTag("NameTag", 2.4, NAME_NEUTRAL)
-        t = { gui = gui, label = label, stroke = stroke, text = nil, color = NAME_NEUTRAL }
+        local gui, label, stroke, dot = makeNameTag(NAME_NEUTRAL)
+        t = { gui = gui, label = label, stroke = stroke, dot = dot, text = nil, color = NAME_NEUTRAL }
         nameTags[player] = t
     end
 
@@ -745,6 +817,7 @@ local function updateNameTag(player, char, show, role, dist)
     if t.color ~= color then
         t.color = color
         t.stroke.Color = color
+        t.dot.BackgroundColor3 = color
     end
 
     local nm = player.DisplayName
@@ -753,7 +826,7 @@ local function updateNameTag(player, char, show, role, dist)
     end
     nm = nm:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
 
-    local text = string.format('%s <font color="#9ca3c0">[%d]</font>', nm, math.floor(dist or 0))
+    local text = string.format('%s  <font color="#9ca3c0" size="12">%dm</font>', nm, math.floor(dist or 0))
     if text ~= t.text then
         t.text = text
         t.label.Text = text
@@ -1164,58 +1237,72 @@ end
 
 -- ═══════════════════════════════════════════════════════════
 --  11. AUTO FARM DE MOEDAS (MM2)
---  - Anda até cada moeda com Tween (velocidade fixa em 22)
---  - SÓ funciona dentro da partida (vivo, com roles definidos e mapa/moedas no jogo)
---  - Modo Seguro: pausas aleatórias, sorteia entre as 3 moedas mais
---    próximas e pausa se o murder chegar perto
---  - Moeda que não dá pra alcançar é descartada após 3 tentativas
+--  - SÓ funciona dentro da partida (vivo, com role definido e mapa/moedas no jogo)
+--  - Underground Farm (padrão): você anda por BAIXO do mapa, sobe só no instante
+--    de pegar a moeda e já desce de novo (nada de ficar voando por cima do mapa)
+--  - Sem Underground: anda reto até a moeda (atravessa paredes)
+--  - O movimento é feito frame a frame (sem Tween) e a posição fica travada:
+--    sem tremedeira, sem cair no vazio e sem travar quando pausa ou desliga
+--  - Modo Seguro: pausas aleatórias, sorteia entre as 3 moedas mais próximas e
+--    espera parado se o murder chegar perto
+--  - Moeda que não dá pra pegar é descartada após 3 tentativas
 --  Obs.: nenhum script garante 100% contra detecção. Use com moderação.
 -- ═══════════════════════════════════════════════════════════
-local farmContainer = nil
-local farmVisited   = {}
-local farmTries     = setmetatable({}, { __mode = "k" })
-local farmCount     = 0
-local farmFullFor   = nil
-local farmMoving    = false
-local farmScanAt    = 0
-local farmIdleAt    = nil
+local FARM_DEPTH = 9 -- Underground: quantos studs abaixo da moeda você anda
 
-local mnAt, mnVal = 0, false
-local function murderNear(root, radius)
+local Farm = {
+    container = nil,   -- pasta das moedas do mapa atual
+    visited   = {},    -- moedas já pegas ou descartadas
+    tries     = setmetatable({}, { __mode = "k" }),
+    count     = 0,     -- moedas pegas nesta partida
+    fullFor   = nil,   -- mapa em que a bolsa já encheu
+    scanAt    = 0,
+    idleAt    = nil,
+    matchOkAt = 0,
+    murderAt  = 0,
+    murderVal = false,
+    engaged   = false, -- true enquanto o script controla o seu personagem
+    under     = false, -- true quando você está embaixo do mapa
+    pos       = nil,   -- CFrame em que o personagem é mantido
+    rootRef   = nil,   -- HumanoidRootPart que está sendo controlado
+    safeCF    = nil,   -- último lugar seguro na superfície (pra voltar)
+}
+
+-- Tem um murder (vivo) perto dessa posição?
+function Farm.murderNear(pos, radius)
     local now = os.clock()
-    if now - mnAt < 0.2 then
-        return mnVal
+    if now - Farm.murderAt < 0.2 then
+        return Farm.murderVal
     end
-    mnAt  = now
-    mnVal = false
+    Farm.murderAt  = now
+    Farm.murderVal = false
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local c = p.Character
             local r = c and c:FindFirstChild("HumanoidRootPart")
             local h = c and c:FindFirstChildOfClass("Humanoid")
-            if r and h and h.Health > 0 and (r.Position - root.Position).Magnitude <= radius then
+            if r and h and h.Health > 0 and (r.Position - pos).Magnitude <= radius then
                 if getRole(p) == "Murderer" then
-                    mnVal = true
+                    Farm.murderVal = true
                     break
                 end
             end
         end
     end
-    return mnVal
+    return Farm.murderVal
 end
 
 -- Você está DENTRO da partida? (vivo, participando da rodada e fora do vazio/limbo)
 -- Fora disso o Auto Farm para sozinho e volta quando você entrar numa partida de novo.
 -- Os dados do jogo podem oscilar por um instante, então existe uma tolerância de 2s
 -- (menos quando você morre: aí para na hora).
-local matchOkAt = 0
-local function inMatch()
+function Farm.inMatch()
     local char = LocalPlayer.Character
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not (hum and root and hum.Health > 0) then
-        matchOkAt = 0
+        Farm.matchOkAt = 0
         return false -- morreu / sem personagem
     end
 
@@ -1230,34 +1317,34 @@ local function inMatch()
 
     local now = os.clock()
     if ok then
-        matchOkAt = now
+        Farm.matchOkAt = now
         return true
     end
-    return matchOkAt > 0 and now - matchOkAt < 2
+    return Farm.matchOkAt > 0 and now - Farm.matchOkAt < 2
 end
 
-local function findCoinContainer()
-    if farmContainer and farmContainer:IsDescendantOf(Workspace) then
-        return farmContainer
+function Farm.findContainer()
+    if Farm.container and Farm.container:IsDescendantOf(Workspace) then
+        return Farm.container
     end
     local now = os.clock()
-    if now - farmScanAt < 1 then
+    if now - Farm.scanAt < 1 then
         return nil
     end
-    farmScanAt = now
+    Farm.scanAt = now
     return Workspace:FindFirstChild("CoinContainer", true)
 end
 
-local function coinAvailable(coin)
+function Farm.coinAvailable(coin)
     return coin:IsA("BasePart")
         and coin:FindFirstChild("CoinVisual") ~= nil
-        and not farmVisited[coin]
+        and not Farm.visited[coin]
 end
 
-local function pickCoin(container, from)
+function Farm.pickCoin(container, from)
     local list = {}
     for _, c in ipairs(container:GetChildren()) do
-        if coinAvailable(c) then
+        if Farm.coinAvailable(c) then
             list[#list + 1] = { coin = c, dist = (c.Position - from).Magnitude }
         end
     end
@@ -1276,57 +1363,112 @@ local function pickCoin(container, from)
     return list[idx].coin
 end
 
--- Anda até a moeda. Retorna: "reached" | "murder" | "gone" | "timeout" | "stopped"
-local function farmMoveTo(root, hum, coin)
-    local goal = coin.CFrame
-    local dist = (root.Position - goal.Position).Magnitude
-    local dur  = math.max(dist / math.max(State.FarmSpeed, 1), 0.05)
-    local tween = TweenService:Create(root, TweenInfo.new(dur, Enum.EasingStyle.Linear), { CFrame = goal })
-
-    local done = false
-    local conn = tween.Completed:Connect(function()
-        done = true
-    end)
-    tween:Play()
-
-    local result = "timeout"
-    local t0 = os.clock()
-    while alive and State.FarmOn and os.clock() - t0 < dur + 1.5 do
-        if done then
-            result = "reached"
-            break
+-- Coloca o personagem numa posição e trava ele lá (zera velocidade e giro).
+-- 'dir' (opcional) faz o personagem olhar na direção do movimento.
+function Farm.setPos(root, p, dir)
+    local cf = nil
+    if dir then
+        local flat = Vector3.new(dir.X, 0, dir.Z)
+        if flat.Magnitude > 0.05 then
+            cf = CFrame.lookAt(p, p + flat)
         end
-        if not (root.Parent and coin.Parent and hum.Health > 0) then
-            result = "gone"
-            break
-        end
-        if not inMatch() then
-            result = "stopped"
-            break
-        end
-        if State.FarmSafe and murderNear(root, 30) then
-            result = "murder"
-            break
-        end
-        root.AssemblyLinearVelocity = Vector3.zero
-        task.wait()
     end
-
-    conn:Disconnect()
-    tween:Cancel()
-
-    if result == "timeout" and not (alive and State.FarmOn) then
-        result = "stopped"
+    if not cf then
+        local old = Farm.pos
+        cf = old and (CFrame.new(p) * (old - old.Position)) or CFrame.new(p)
     end
-    return result
+    Farm.pos = cf
+    root.CFrame = cf
+    root.AssemblyLinearVelocity  = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
 end
 
--- Atravessa paredes só enquanto anda até a moeda (lista de peças em cache)
+-- Solta o personagem. Se você estava embaixo do mapa, sobe de volta pra
+-- superfície antes (só se o jogo não te levou pra outro lugar nesse meio tempo).
+function Farm.release()
+    local root, pos = Farm.rootRef, Farm.pos
+    if Farm.engaged and Farm.under and Farm.safeCF
+        and root and root.Parent and pos
+        and (root.Position - pos.Position).Magnitude < 20 then
+        root.CFrame = Farm.safeCF
+        root.AssemblyLinearVelocity  = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+    Farm.engaged = false
+    Farm.under   = false
+    Farm.pos     = nil
+    Farm.rootRef = nil
+end
+
+-- Anda em linha reta até 'goal' (Vector3), frame a frame, na velocidade 'speed'.
+-- Retorna: "arrived" | "murder" | "gone" | "timeout" | "stopped"
+function Farm.glide(root, hum, coin, goal, speed)
+    local t0      = os.clock()
+    local maxTime = (goal - Farm.pos.Position).Magnitude / speed + 3
+
+    while true do
+        if not (alive and State.FarmOn) or flingRunning then
+            return "stopped"
+        end
+        if not (root.Parent and hum.Parent and hum.Health > 0) then
+            return "stopped"
+        end
+        if not coin.Parent then
+            return "gone"
+        end
+        if not Farm.inMatch() then
+            return "stopped"
+        end
+        if State.FarmSafe and Farm.murderNear(Farm.pos.Position, 30) then
+            return "murder"
+        end
+        if os.clock() - t0 > maxTime then
+            return "timeout"
+        end
+
+        local dt = math.min(RunService.Heartbeat:Wait(), 0.1)
+        if not Farm.pos then
+            return "stopped" -- o Auto Farm foi solto enquanto esperava o frame
+        end
+        local from = Farm.pos.Position
+        local diff = goal - from
+        local dist = diff.Magnitude
+        local step = speed * dt
+        if dist <= step then
+            Farm.setPos(root, goal)
+            return "arrived"
+        end
+        Farm.setPos(root, from + diff / dist * step, diff)
+    end
+end
+
+-- Espera a moeda sumir (foi coletada). Retorna true se coletou.
+function Farm.waitCollected(coin)
+    local t0 = os.clock()
+    while alive and State.FarmOn and coin.Parent
+        and coin:FindFirstChild("CoinVisual") and os.clock() - t0 < 0.4 do
+        task.wait()
+    end
+    return coin.Parent == nil or coin:FindFirstChild("CoinVisual") == nil
+end
+
+-- Mantém o personagem travado na posição enquanto o Auto Farm está no controle
+-- (é isso que segura você embaixo do mapa nas pausas, sem cair)
+track(RunService.Heartbeat:Connect(function()
+    if not Farm.engaged then return end
+    local root = Farm.rootRef
+    if not (root and root.Parent and Farm.pos) then return end
+    root.CFrame = Farm.pos
+    root.AssemblyLinearVelocity  = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+end))
+
+-- Atravessa paredes e chão enquanto o Auto Farm está no controle (lista de peças em cache)
 do
     local parts, partsAt, partsChar = {}, 0, nil
 
     track(RunService.Stepped:Connect(function()
-        if not (State.FarmOn and farmMoving) then return end
+        if not (State.FarmOn and Farm.engaged) then return end
 
         local char = LocalPlayer.Character
         if not char then return end
@@ -1351,38 +1493,47 @@ do
 end
 
 loop("farm", 0.03, function()
-    if not State.FarmOn then
-        farmMoving = false
+    -- desligado / Fling ativo: solta o personagem
+    if not State.FarmOn or flingRunning then
+        if Farm.engaged then Farm.release() end
         return
     end
-    if flingRunning then return end -- Fling ativo: o Auto Farm espera
 
     -- Fora da partida (morreu, lobby, limbo...): não faz nada
-    if not inMatch() then
-        farmMoving = false
+    if not Farm.inMatch() then
+        if Farm.engaged then Farm.release() end
         return
     end
 
     local char = LocalPlayer.Character
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    local container = findCoinContainer()
+    local container = Farm.findContainer()
 
     -- Mapa novo = partida nova: zera o contador
-    if container ~= farmContainer then
-        farmContainer = container
-        farmVisited   = {}
-        farmTries     = setmetatable({}, { __mode = "k" })
-        farmCount     = 0
-        farmFullFor   = nil
+    if container ~= Farm.container then
+        Farm.release()
+        Farm.container = container
+        Farm.visited   = {}
+        Farm.tries     = setmetatable({}, { __mode = "k" })
+        Farm.count     = 0
+        Farm.fullFor   = nil
     end
 
-    if not (hum and root and hum.Health > 0 and container) or farmFullFor == container then
+    if not (hum and root and hum.Health > 0 and container) or Farm.fullFor == container then
+        if Farm.engaged then Farm.release() end
         return
     end
 
-    if farmCount >= State.FarmLimit then
-        farmFullFor = container
+    -- Personagem novo (respawn): recomeça do zero
+    if Farm.engaged and Farm.rootRef ~= root then
+        Farm.engaged, Farm.under, Farm.pos, Farm.rootRef = false, false, nil, nil
+    end
+
+    -- Bolsa cheia: sobe de volta, para até a próxima rodada (e reseta se pedido)
+    if Farm.count >= State.FarmLimit then
+        Farm.fullFor = container
+        Farm.release()
         notify(L("farm_full"), "check")
         if State.FarmReset then
             hum.Health = 0
@@ -1390,48 +1541,100 @@ loop("farm", 0.03, function()
         return
     end
 
-    -- Murder perto: fica parado e espera
-    if State.FarmSafe and murderNear(root, 30) then
+    -- Desligou o Underground com você embaixo do mapa: sobe de volta
+    if Farm.engaged and Farm.under and not State.FarmUnder then
+        Farm.release()
+    end
+
+    local from = (Farm.engaged and Farm.pos or root.CFrame).Position
+
+    -- Murder perto: espera. Embaixo do mapa fica travado onde está;
+    -- na superfície solta o personagem (ele volta pro chão).
+    if State.FarmSafe and Farm.murderNear(from, 30) then
+        if Farm.engaged and not Farm.under then
+            Farm.release()
+        end
         return
     end
 
-    local coin = pickCoin(container, root.Position)
+    local coin = Farm.pickCoin(container, from)
     if not coin then
-        -- sem moeda livre: depois de 3s libera as já visitadas que ainda existem
-        farmIdleAt = farmIdleAt or os.clock()
-        if os.clock() - farmIdleAt > 3 then
-            farmIdleAt = nil
-            farmVisited = {}
-            farmTries   = setmetatable({}, { __mode = "k" })
+        -- sem moeda livre: sobe depois de 1s e, depois de 3s, libera as já visitadas que ainda existem
+        Farm.idleAt = Farm.idleAt or os.clock()
+        local idle = os.clock() - Farm.idleAt
+        if idle > 1 and Farm.engaged then
+            Farm.release()
+        end
+        if idle > 3 then
+            Farm.idleAt  = nil
+            Farm.visited = {}
+            Farm.tries   = setmetatable({}, { __mode = "k" })
         end
         return
     end
-    farmIdleAt = nil
+    Farm.idleAt = nil
 
-    farmMoving = true
-    local okMove, result = pcall(farmMoveTo, root, hum, coin)
-    farmMoving = false
+    -- Assume o controle do personagem
+    if not Farm.engaged then
+        Farm.engaged = true
+        Farm.under   = false
+        Farm.rootRef = root
+        Farm.pos     = root.CFrame
+        Farm.safeCF  = root.CFrame
+    end
 
-    if not okMove then
-        safeWarn(result, "farm-move")
+    local coinPos = coin.Position
+    local speed   = math.max(State.FarmSpeed, 1)
+    local result
+
+    if State.FarmUnder then
+        local depthY = coinPos.Y - FARM_DEPTH
+        if not Farm.under then
+            -- mergulha na vertical (direto embaixo de onde você está)
+            local p = Farm.pos.Position
+            Farm.setPos(root, Vector3.new(p.X, depthY, p.Z))
+            Farm.under = true
+        end
+        result = Farm.glide(root, hum, coin, Vector3.new(coinPos.X, depthY, coinPos.Z), speed)
+    else
+        result = Farm.glide(root, hum, coin, coinPos, speed)
+    end
+
+    if result == "stopped" then
+        Farm.release()
         return
     end
 
-    if result == "reached" then
-        -- espera só o tempo de a moeda ser coletada e já segue pra próxima
-        local t0 = os.clock()
-        while coin.Parent and coin:FindFirstChild("CoinVisual") and os.clock() - t0 < 0.35 do
-            task.wait()
+    if result == "arrived" then
+        if State.FarmUnder then
+            -- sobe até a moeda (esse é o ponto de volta seguro se parar agora)
+            Farm.setPos(root, coinPos)
+            Farm.under  = false
+            Farm.safeCF = CFrame.new(coinPos + Vector3.new(0, 2, 0))
         end
-        if not coin.Parent or not coin:FindFirstChild("CoinVisual") then
-            farmCount = farmCount + 1
-            farmVisited[coin] = true
+
+        if firetouchinterest then
+            pcall(function()
+                firetouchinterest(root, coin, 0)
+                firetouchinterest(root, coin, 1)
+            end)
+        end
+
+        if Farm.waitCollected(coin) then
+            Farm.count = Farm.count + 1
+            Farm.visited[coin] = true
         else
             -- não coletou: tenta de novo (até 3 vezes) em vez de ignorar a moeda pra sempre
-            farmTries[coin] = (farmTries[coin] or 0) + 1
-            if farmTries[coin] >= 3 then
-                farmVisited[coin] = true
+            Farm.tries[coin] = (Farm.tries[coin] or 0) + 1
+            if Farm.tries[coin] >= 3 then
+                Farm.visited[coin] = true
             end
+        end
+
+        -- já desce de volta pra baixo do mapa
+        if State.FarmUnder and Farm.engaged and root.Parent then
+            Farm.setPos(root, Vector3.new(coinPos.X, coinPos.Y - FARM_DEPTH, coinPos.Z))
+            Farm.under = true
         end
 
         if State.FarmSafe then
@@ -1440,9 +1643,9 @@ loop("farm", 0.03, function()
 
     elseif result == "timeout" then
         -- moeda que não dá pra alcançar: desiste depois de 3 tentativas
-        farmTries[coin] = (farmTries[coin] or 0) + 1
-        if farmTries[coin] >= 3 then
-            farmVisited[coin] = true
+        Farm.tries[coin] = (Farm.tries[coin] or 0) + 1
+        if Farm.tries[coin] >= 3 then
+            Farm.visited[coin] = true
         end
     end
 end)
@@ -1463,7 +1666,7 @@ end
 
 track(RunService.Heartbeat:Connect(function(dt)
     if not State.CFrameOn then return end
-    if (State.FarmOn and farmMoving) or flingRunning then return end
+    if Farm.engaged or flingRunning then return end
 
     local char = LocalPlayer.Character
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
@@ -1865,9 +2068,8 @@ local function startFling()
 end
 
 -- ═══════════════════════════════════════════════════════════
---  13. AIMBOT MM2: Magic Bullet, Shoot Through Walls e Auto Pick
+--  13. AIMBOT MM2: Magic Bullet e Auto Pick
 --  - Magic Bullet: a bala do SEU tiro vai direto pro murder (posição lida na hora do tiro)
---  - Shoot Through Walls: parede não bloqueia o tiro (raycast da Gun + tag WeaponPassthrough)
 --  - Auto Pick Dropped Gun: só pega a arma dropada (não atira sozinho)
 -- ═══════════════════════════════════════════════════════════
 local magicAim  = nil
@@ -1924,8 +2126,6 @@ local Aim = {
     gun      = nil,   -- a Tool "Gun"
     equipped = false, -- Gun na mão
     ping     = 0.1,   -- ping em segundos (compensação do tiro)
-    tagged   = {},    -- peças que EU marquei como atravessáveis (Shoot Through Walls)
-    taggedN  = 0,
 }
 
 -- Ping atual em segundos
@@ -1970,49 +2170,6 @@ function Aim.point()
     return pos
 end
 
--- Shoot Through Walls (parte 1): remove as marcas que EU coloquei
-function Aim.clearTags()
-    for part in pairs(Aim.tagged) do
-        pcall(function()
-            CollectionService:RemoveTag(part, "WeaponPassthrough")
-        end)
-        Aim.tagged[part] = nil
-    end
-    Aim.taggedN = 0
-end
-
--- Shoot Through Walls (parte 2): tudo que estiver entre você e o murder
--- recebe a tag "WeaponPassthrough" (a mesma que o jogo usa pras peças que a bala atravessa)
-function Aim.markWalls(fromPos, toPos, mChar)
-    if Aim.taggedN > 250 then
-        Aim.clearTags()
-    end
-
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.IgnoreWater = true
-
-    local ex  = { LocalPlayer.Character, mChar }
-    local dir = toPos - fromPos
-
-    for _ = 1, 12 do
-        params.FilterDescendantsInstances = ex
-        local hit = Workspace:Raycast(fromPos, dir, params)
-        if not hit then break end
-
-        local part = hit.Instance
-        if not part then break end
-        ex[#ex + 1] = part
-
-        if part:IsA("BasePart") and not part:IsA("Terrain")
-            and not CollectionService:HasTag(part, "WeaponPassthrough") then
-            CollectionService:AddTag(part, "WeaponPassthrough")
-            Aim.tagged[part] = true
-            Aim.taggedN = Aim.taggedN + 1
-        end
-    end
-end
-
 -- Em qual argumento do remote vai a posição do tiro?
 function Aim.findSlot(args, count)
     local a2 = typeof(args[2])
@@ -2037,29 +2194,6 @@ function Aim.isShootRemote(inst)
     local parent = inst.Parent
     return inst.Name:lower():find("shoot", 1, true) ~= nil
         or (parent ~= nil and parent.Name == "CreateBeam")
-end
-
--- O raycast veio do script da Gun (e não de outro script do jogo)?
-function Aim.callerIsGun()
-    if not getcallingscript then
-        return true
-    end
-    local ok, scr = pcall(getcallingscript)
-    if not ok or typeof(scr) ~= "Instance" then
-        return true
-    end
-
-    local node, depth = scr, 0
-    while node and depth < 12 do
-        if node == Aim.gun then
-            return true
-        end
-        node  = node.Parent
-        depth = depth + 1
-    end
-
-    local n = scr.Name:lower()
-    return n:find("knife", 1, true) ~= nil or n:find("gun", 1, true) ~= nil
 end
 
 -- Hook do tiro (precisa de executor com hookmetamethod ou getrawmetatable)
@@ -2097,34 +2231,6 @@ local function aimHandler(self, ...)
                     end
                     return oldNamecall(self, unpack(args, 1, count))
                 end
-            end
-
-        -- 2) SHOOT THROUGH WALLS: o raycast da Gun só enxerga o murder (parede não bloqueia)
-        elseif State.WallShot and Aim.equipped
-            and method == "Raycast" and self == Workspace then
-
-            local origin, direction = ...
-            if typeof(origin) == "Vector3" and typeof(direction) == "Vector3"
-                and Aim.char and Aim.char.Parent and Aim.callerIsGun() then
-
-                -- com Magic Bullet ligado, o raio também aponta direto pro murder
-                local aim = State.MagicBullet and Aim.point()
-                if aim then
-                    local to = aim - origin
-                    if to.Magnitude > 0.1 then
-                        direction = to.Unit * math.max(direction.Magnitude, to.Magnitude + 5)
-                    end
-                end
-
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Include
-                params.FilterDescendantsInstances = { Aim.char }
-                params.IgnoreWater = true
-
-                if setnamecallmethod then
-                    setnamecallmethod(method)
-                end
-                return oldNamecall(self, origin, direction, params)
             end
         end
     end
@@ -2174,21 +2280,18 @@ end
 
 -- Escolhe o alvo (~20x por segundo) e mantém o ponto de mira sempre atualizado
 do
-    local scanAt, pingAt, wallAt = 0, 0, 0
+    local scanAt, pingAt = 0, 0
     State.MagicStatus = "off"
 
     local function clearTarget()
         Aim.active, Aim.equipped = false, false
         Aim.char, Aim.root, Aim.head, Aim.gun = nil, nil, nil, nil
         magicAim = nil
-        if Aim.taggedN > 0 then
-            Aim.clearTags()
-        end
     end
 
     track(RunService.Heartbeat:Connect(function()
-        if not (State.MagicBullet or State.WallShot) then
-            if Aim.active or Aim.taggedN > 0 then
+        if not State.MagicBullet then
+            if Aim.active then
                 clearTarget()
             end
             State.MagicStatus = "off"
@@ -2249,12 +2352,6 @@ do
                 Aim.gun, Aim.equipped = gun, equipped
                 Aim.active = true
                 State.MagicStatus = "ready"
-
-                -- Shoot Through Walls: marca o que está entre você e o murder
-                if State.WallShot and now - wallAt >= 0.12 then
-                    wallAt = now
-                    Aim.markWalls(root.Position, mRoot.Position, mChar)
-                end
             end)
 
             if not ok then
@@ -2554,11 +2651,12 @@ buildUI = function()
         })
     end
 
-    local TabMain     = newTab("tab_main", "home")
+    -- ordem das abas no menu (o ícone da Main é "house": o nome antigo "home" não existe mais no Lucide)
+    local TabMain     = newTab("tab_main", "house")
     local TabPlayer   = newTab("tab_player", "user")
+    local TabFarm     = newTab("tab_farm", "coins")
     local TabVisuals  = newTab("tab_visuals", "eye")
     local TabPick     = newTab("tab_pick", "crosshair")
-    local TabFarm     = newTab("tab_farm", "coins")
     local TabSheriff  = newTab("tab_sheriff", "target")
     local TabTroll    = newTab("tab_troll", "zap")
     local TabSettings = newTab("tab_settings", "settings")
@@ -2618,6 +2716,15 @@ buildUI = function()
         end
     end)
 
+    -- ───────────── AUTO FARM ─────────────
+    -- (o Auto Farm nunca liga sozinho na próxima execução)
+    local FarmSec = newSection(TabFarm, L("sec_farm"))
+    addToggle(FarmSec, L("farm_on"), "FarmOn")
+    addToggle(FarmSec, L("farm_under"), "FarmUnder")
+    addSlider(FarmSec, L("farm_limit"), "FarmLimit", 10, 60)
+    addToggle(FarmSec, L("farm_safe"), "FarmSafe")
+    addToggle(FarmSec, L("farm_reset"), "FarmReset")
+
     -- ───────────── VISUALS (ESP) ─────────────
     local NameSec = newSection(TabVisuals, L("sec_name"))
     addToggle(NameSec, L("esp_name"), "EspName")
@@ -2651,14 +2758,6 @@ buildUI = function()
         end,
     })
 
-    -- ───────────── AUTO FARM ─────────────
-    -- (o Auto Farm nunca liga sozinho na próxima execução)
-    local FarmSec = newSection(TabFarm, L("sec_farm"))
-    addToggle(FarmSec, L("farm_on"), "FarmOn")
-    addSlider(FarmSec, L("farm_limit"), "FarmLimit", 10, 60)
-    addToggle(FarmSec, L("farm_safe"), "FarmSafe")
-    addToggle(FarmSec, L("farm_reset"), "FarmReset")
-
     -- ───────────── AIMBOT MM2 ─────────────
     local MagicSec = newSection(TabSheriff, L("sec_magic"))
     addToggle(MagicSec, L("magic"), "MagicBullet", function(v)
@@ -2686,17 +2785,6 @@ buildUI = function()
         end,
     })
     addToggle(MagicSec, L("magic_predict"), "AimPredict")
-
-    local WallSec = newSection(TabSheriff, L("sec_wall"))
-    addToggle(WallSec, L("wall_shot"), "WallShot", function(v)
-        if v then
-            if not installAimHook() then
-                notify(L("no_hook"), "triangle-alert", 4)
-            end
-        else
-            Aim.clearTags()
-        end
-    end)
 
     local AutoPickSec = newSection(TabSheriff, L("sec_autopick"))
     addToggle(AutoPickSec, L("autopick_gun"), "AutoPickGun")
@@ -2838,11 +2926,10 @@ end
 Unload = function()
     if not alive then return end
     alive = false
-    farmMoving = false
+    pcall(Farm.release) -- sobe de volta pra superfície se estava embaixo do mapa
     magicAim   = nil
     forcedAim  = nil
     Aim.active = false
-    pcall(Aim.clearTags) -- devolve as peças que viraram "atravessáveis"
     State.Fling = false -- o loop do Fling percebe, volta pra origem e termina
 
     for _, c in ipairs(connections) do
@@ -2880,7 +2967,7 @@ end)
 if okBuild then
     -- aplica as opções carregadas do arquivo que têm efeito imediato
     setPickButtonVisible(State.PickButton)
-    if State.MagicBullet or State.WallShot then
+    if State.MagicBullet then
         pcall(installAimHook)
     end
     notify(L("loaded"), "check", 4)
