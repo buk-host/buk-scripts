@@ -2,12 +2,12 @@
     ╔══════════════════════════════════════╗
     ║  Buk                                 ║
     ║  Developed by: Linesketon02          ║
-    ║  UI: Própria (sem biblioteca)        ║
+    ║  UI: Obsidian                        ║
     ╚══════════════════════════════════════╝
 
     Abas: Main | Player | ESP | Weapon | Auto Farm | Aimbot MM2 | Troll | Copy Animation | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
-    Botão "-" minimiza e vira um ícone flutuante (toque nele para abrir de novo)
+    Celular: botões "Toggle" (abrir/fechar) e "Lock" (travar arrastar) aparecem no canto da tela
 ]]
 
 -- ═══════════════════════════════════════════════════════════
@@ -163,7 +163,7 @@ local STR = {
         save_fail_text = "Couldn't save the settings.",
         no_files = "Your executor can't save files (writefile).",
         sec_info = "Info", info_author = "Developed by: Linesketon02",
-        info_menu = "Tap the minimize button (-) to hide the menu, then tap the floating Buk icon to open it again. You can also use the Menu Key (Settings).",
+        info_menu = "Mobile: use the Toggle button on the screen to open/close the menu. PC: use the Menu Key (Settings > Menu Key).",
         close_confirm = "Tap X again to close the script.",
         none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
     },
@@ -2648,1167 +2648,323 @@ track(Players.PlayerRemoving:Connect(function(p)
 end))
 
 -- ═══════════════════════════════════════════════════════════
---  15. INTERFACE (própria, sem nenhuma biblioteca)
---  Janela preta transparente com abas na lateral, botão
---  flutuante ao minimizar e avisos no canto da tela.
+--  15. INTERFACE (Obsidian UI)
+--  Biblioteca Obsidian: funciona em PC e celular.
+--  No celular aparecem os botões "Toggle" (abrir/fechar o menu)
+--  e "Lock" (travar o arrastar da janela).
 -- ═══════════════════════════════════════════════════════════
-local UIGui     = nil
-local NotifyGui = nil
+local OBSIDIAN_REPO = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local ObsidianLib   = nil
 local buildUI, Unload, destroyUI
 
-local function defineUI()
-    local UIState = { Listening = false }
+-- Baixa e executa um módulo da Obsidian (devolve nil + motivo se falhar)
+local function fetchModule(path)
+    local okGet, body = pcall(function()
+        return game:HttpGet(OBSIDIAN_REPO .. path)
+    end)
+    if not okGet or type(body) ~= "string" or #body == 0 then
+        return nil, "could not download " .. path
+    end
 
-    local Theme = {
-        Window  = Color3.fromRGB(0, 0, 0),
-        Panel   = Color3.fromRGB(8, 8, 8),
-        Element = Color3.fromRGB(20, 20, 22),
-        Hover   = Color3.fromRGB(44, 44, 48),
-        Off     = Color3.fromRGB(62, 62, 68),
-        Text    = Color3.fromRGB(245, 245, 245),
-        SubText = Color3.fromRGB(150, 150, 156),
-        Accent  = ACCENT,
-        Good    = Color3.fromRGB(74, 222, 128),
-        Warn    = Color3.fromRGB(251, 176, 64),
-    }
-    local WINDOW_T  = 0.2   -- transparência da janela
-    local PANEL_T   = 0.45  -- transparência da barra lateral
-    local ELEMENT_T = 0.3   -- transparência dos botões/linhas
+    local fn, compileErr = loadstring(body)
+    if not fn then
+        return nil, "could not compile " .. path .. ": " .. tostring(compileErr)
+    end
 
-    destroyUI = function()
-        NotifyImpl = nil
+    local okRun, result = pcall(fn)
+    if not okRun then
+        return nil, "could not run " .. path .. ": " .. tostring(result)
+    end
+    return result
+end
+
+destroyUI = function()
+    NotifyImpl = nil
+    FlingDropdown, FlingToggle, EmoteDropdown = nil, nil, nil
+
+    local lib = ObsidianLib
+    ObsidianLib = nil
+    if lib and not lib.Unloaded then
         pcall(function()
-            if UIGui then UIGui:Destroy() end
-        end)
-        pcall(function()
-            if NotifyGui then NotifyGui:Destroy() end
-        end)
-        UIGui, NotifyGui = nil, nil
-    end
-
-    -- ───────────── ferramentas de desenho ─────────────
-    local function make(class, props, parent)
-        local inst = Instance.new(class)
-        for k, v in pairs(props) do
-            inst[k] = v
-        end
-        if parent then
-            inst.Parent = parent
-        end
-        return inst
-    end
-
-    local function round(inst, radius)
-        return make("UICorner", { CornerRadius = UDim.new(0, radius) }, inst)
-    end
-
-    local function outline(inst, transparency, color, thickness)
-        return make("UIStroke", {
-            Color           = color or WHITE,
-            Transparency    = transparency or 0.88,
-            Thickness       = thickness or 1,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        }, inst)
-    end
-
-    local function pad(inst, l, t, r, b)
-        return make("UIPadding", {
-            PaddingLeft   = UDim.new(0, l),
-            PaddingTop    = UDim.new(0, t),
-            PaddingRight  = UDim.new(0, r),
-            PaddingBottom = UDim.new(0, b),
-        }, inst)
-    end
-
-    local function tween(inst, time, props)
-        pcall(function()
-            TweenService:Create(
-                inst,
-                TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                props
-            ):Play()
+            lib:Unload()
         end)
     end
+end
 
-    local function newText(parent, props)
-        local p = {
-            BackgroundTransparency = 1,
-            BorderSizePixel        = 0,
-            Font                   = Enum.Font.GothamMedium,
-            TextSize               = 16,
-            TextColor3             = Theme.Text,
-            TextXAlignment         = Enum.TextXAlignment.Left,
+buildUI = function()
+    destroyUI()
+
+    local Library, libErr = fetchModule("Library.lua")
+    if not Library then
+        error("Obsidian UI: " .. tostring(libErr))
+    end
+    ObsidianLib = Library
+
+    local Options = Library.Options
+    local Toggles = Library.Toggles
+    local uiReady = false -- evita que callbacks da criação mexam no State
+
+    -- Avisos (usa as notificações da Obsidian)
+    NotifyImpl = function(text, icon, duration)
+        local data = {
+            Title       = "Buk",
+            Description = tostring(text),
+            Time        = duration or 3,
         }
-        for k, v in pairs(props) do
-            p[k] = v
+        if icon then
+            data.Icon = icon
         end
-        return make("TextLabel", p, parent)
-    end
-
-    -- chama um callback sem deixar um erro dele derrubar a interface
-    local function fire(callback, ...)
-        if type(callback) ~= "function" then return end
-        local ok, err = pcall(callback, ...)
+        local ok = pcall(function()
+            Library:Notify(data)
+        end)
         if not ok then
-            safeWarn(err, "ui")
+            data.Icon = nil
+            Library:Notify(data)
         end
     end
 
-    local function screenSize()
-        if UIGui and UIGui.AbsoluteSize.X > 0 then
-            return UIGui.AbsoluteSize
-        end
-        local cam = Workspace.CurrentCamera or Camera
-        return cam.ViewportSize
-    end
+    -- ───────────── JANELA ─────────────
+    local Window = Library:CreateWindow({
+        Title            = "Buk",
+        Footer           = "by Linesketon02",
+        NotifySide       = "Right",
+        ShowCustomCursor = false,
+        ToggleKeybind    = State.MenuKey,
+        Size             = Library.IsMobile and UDim2.fromOffset(560, 300) or UDim2.fromOffset(660, 440),
+    })
 
-    local function isPress(input)
-        return input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch
-    end
+    local TabMain     = Window:AddTab(L("tab_main"), "house")
+    local TabPlayer   = Window:AddTab(L("tab_player"), "user")
+    local TabVisuals  = Window:AddTab(L("tab_visuals"), "eye")
+    local TabPick     = Window:AddTab(L("tab_pick"), "hand")
+    local TabFarm     = Window:AddTab(L("tab_farm"), "coins")
+    local TabSheriff  = Window:AddTab(L("tab_sheriff"), "crosshair")
+    local TabTroll    = Window:AddTab(L("tab_troll"), "zap")
+    local TabEmotes   = Window:AddTab(L("tab_emotes"), "copy")
+    local TabSettings = Window:AddTab(L("tab_settings"), "settings")
 
-    -- Arrastar (mouse e toque). onTap roda se soltar sem ter arrastado.
-    local function makeDraggable(handle, target, onTap)
-        local dragging   = false
-        local moved      = false
-        local startInput = nil
-        local startPos   = nil
-        local startX, startY = 0, 0
-
-        handle.InputBegan:Connect(function(input)
-            if dragging or not isPress(input) then return end
-            dragging   = true
-            moved      = false
-            startInput = input
-            startPos   = input.Position
-            startX     = target.Position.X.Offset
-            startY     = target.Position.Y.Offset
-
-            local conn
-            conn = input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    conn:Disconnect()
-                    dragging = false
-                    if not moved and onTap then
-                        fire(onTap)
-                    end
-                end
-            end)
-        end)
-
-        track(UserInputService.InputChanged:Connect(function(input)
-            if not dragging then return end
-            if input ~= startInput and input.UserInputType ~= Enum.UserInputType.MouseMovement then
-                return
-            end
-            local dx = input.Position.X - startPos.X
-            local dy = input.Position.Y - startPos.Y
-            if not moved and (math.abs(dx) > 6 or math.abs(dy) > 6) then
-                moved = true
-            end
-            if moved then
-                local screen = screenSize()
-                local size   = target.AbsoluteSize
-                target.Position = UDim2.fromOffset(
-                    math.clamp(startX + dx, -size.X + 90, screen.X - 90),
-                    math.clamp(startY + dy, 0, screen.Y - 40)
-                )
-            end
-        end))
-    end
-
-    -- ───────────── avisos (notificações) ─────────────
-    local function setupNotify()
-        NotifyGui = newScreenGui("BukNotify", 200)
-
-        local holder = make("Frame", {
-            Name                   = "Holder",
-            AnchorPoint            = Vector2.new(1, 0),
-            Position               = UDim2.new(1, -16, 0, 16),
-            Size                   = UDim2.new(0, 300, 1, -32),
-            BackgroundTransparency = 1,
-        }, NotifyGui)
-        make("UIListLayout", {
-            Padding             = UDim.new(0, 8),
-            SortOrder           = Enum.SortOrder.LayoutOrder,
-            HorizontalAlignment = Enum.HorizontalAlignment.Right,
-        }, holder)
-
-        local order = 0
-        local cards = {}
-
-        NotifyImpl = function(text, icon, duration)
-            order = order + 1
-
-            local color = Theme.Accent
-            if icon == "triangle-alert" then
-                color = Theme.Warn
-            elseif icon == "check" or icon == "save" then
-                color = Theme.Good
-            end
-
-            local card = make("Frame", {
-                Size                   = UDim2.new(0, 290, 0, 0),
-                AutomaticSize          = Enum.AutomaticSize.Y,
-                BackgroundColor3       = Theme.Window,
-                BackgroundTransparency = 1,
-                BorderSizePixel        = 0,
-                LayoutOrder            = order,
-            }, holder)
-            round(card, 10)
-            local st = outline(card, 1, color, 1)
-            pad(card, 16, 10, 14, 10)
-            make("UIListLayout", {
-                Padding   = UDim.new(0, 2),
-                SortOrder = Enum.SortOrder.LayoutOrder,
-            }, card)
-
-            local title = newText(card, {
-                Text             = "Buk",
-                Font             = Enum.Font.GothamBold,
-                TextSize         = 13,
-                TextColor3       = color,
-                TextTransparency = 1,
-                Size             = UDim2.new(1, 0, 0, 16),
-                LayoutOrder      = 1,
-            })
-            local msg = newText(card, {
-                Text             = tostring(text),
-                TextSize         = 15,
-                TextWrapped      = true,
-                TextTransparency = 1,
-                Size             = UDim2.new(1, 0, 0, 0),
-                AutomaticSize    = Enum.AutomaticSize.Y,
-                LayoutOrder      = 2,
-            })
-
-            tween(card, 0.2, { BackgroundTransparency = 0.12 })
-            tween(st, 0.2, { Transparency = 0.45 })
-            tween(title, 0.2, { TextTransparency = 0 })
-            tween(msg, 0.2, { TextTransparency = 0 })
-
-            cards[#cards + 1] = card
-            while #cards > 4 do
-                local old = table.remove(cards, 1)
-                pcall(function() old:Destroy() end)
-            end
-
-            task.delay(math.max(duration or 2.5, 1), function()
-                if not card.Parent then return end
-                tween(card, 0.25, { BackgroundTransparency = 1 })
-                tween(st, 0.25, { Transparency = 1 })
-                tween(title, 0.25, { TextTransparency = 1 })
-                tween(msg, 0.25, { TextTransparency = 1 })
-                task.wait(0.3)
-                local i = table.find(cards, card)
-                if i then table.remove(cards, i) end
-                pcall(function() card:Destroy() end)
-            end)
-        end
-    end
-
-    -- ───────────── a janela ─────────────
-    local function createWindow(cfg)
-        UIGui = newScreenGui("BukUI", 50)
-
-        local vp     = screenSize()
-        local width  = math.clamp(math.floor(vp.X * 0.62), 460, 760)
-        local height = math.clamp(math.floor(vp.Y * 0.78), 300, 500)
-        width  = math.min(width,  vp.X - 16)
-        height = math.min(height, vp.Y - 16)
-
-        local sideW = (width >= 600) and 168 or 138
-        local TOP_H = 52
-
-        local window = make("Frame", {
-            Name                   = "Window",
-            Position               = UDim2.fromOffset(
-                math.floor((vp.X - width) / 2),
-                math.floor((vp.Y - height) / 2)
-            ),
-            Size                   = UDim2.fromOffset(width, height),
-            BackgroundColor3       = Theme.Window,
-            BackgroundTransparency = WINDOW_T,
-            BorderSizePixel        = 0,
-            Active                 = true,
-        }, UIGui)
-        round(window, 14)
-        outline(window, 0.82)
-
-        -- ícone flutuante (aparece quando o menu está minimizado)
-        local icon = make("TextButton", {
-            Name                   = "Icon",
-            Position               = UDim2.fromOffset(20, math.floor(vp.Y * 0.3)),
-            Size                   = UDim2.fromOffset(60, 60),
-            BackgroundColor3       = Theme.Window,
-            BackgroundTransparency = 0.15,
-            AutoButtonColor        = false,
-            Text                   = "Buk",
-            Font                   = Enum.Font.GothamBold,
-            TextSize               = 18,
-            TextColor3             = Theme.Text,
-            Visible                = false,
-        }, UIGui)
-        round(icon, 30)
-        outline(icon, 0.1, Theme.Accent, 2)
-
-        local function setOpen(open)
-            window.Visible = open
-            icon.Visible   = not open
-        end
-
-        makeDraggable(icon, icon, function()
-            setOpen(true)
-        end)
-
-        -- barra de cima
-        local top = make("Frame", {
-            Name                   = "Top",
-            Size                   = UDim2.new(1, 0, 0, TOP_H),
-            BackgroundTransparency = 1,
-            Active                 = true,
-        }, window)
-        makeDraggable(top, window)
-
-        newText(top, {
-            Text     = cfg.Title,
-            Font     = Enum.Font.GothamBold,
-            TextSize = 22,
-            Position = UDim2.fromOffset(18, 6),
-            Size     = UDim2.new(0.5, 0, 0, 26),
+    -- ───────────── ajudantes ─────────────
+    local function addToggle(box, title, key, onChange)
+        local idx = "T_" .. key
+        box:AddToggle(idx, {
+            Text     = title,
+            Default  = State[key] == true,
+            Callback = function(v)
+                if not uiReady then return end
+                State[key] = v and true or false
+                if onChange then onChange(v) end
+            end,
         })
-        newText(top, {
-            Text       = cfg.Author,
-            TextSize   = 13,
-            TextColor3 = Theme.SubText,
-            Position   = UDim2.fromOffset(18, 31),
-            Size       = UDim2.new(0.5, 0, 0, 16),
+        return Toggles[idx]
+    end
+
+    local function addSlider(box, title, key, min, max)
+        local idx = "S_" .. key
+        box:AddSlider(idx, {
+            Text     = title,
+            Default  = math.clamp(State[key], min, max),
+            Min      = min,
+            Max      = max,
+            Rounding = 0,
+            Callback = function(v)
+                if not uiReady then return end
+                State[key] = tonumber(v) or State[key]
+            end,
         })
-
-        make("Frame", {
-            Position               = UDim2.fromOffset(0, TOP_H),
-            Size                   = UDim2.new(1, 0, 0, 1),
-            BackgroundColor3       = WHITE,
-            BackgroundTransparency = 0.9,
-            BorderSizePixel        = 0,
-        }, window)
-
-        local function topButton(text, xOffset)
-            local b = make("TextButton", {
-                Position               = UDim2.new(1, xOffset, 0, 7),
-                Size                   = UDim2.fromOffset(38, 38),
-                BackgroundColor3       = Theme.Element,
-                BackgroundTransparency = ELEMENT_T,
-                AutoButtonColor        = false,
-                Text                   = text,
-                Font                   = Enum.Font.GothamBold,
-                TextSize               = 20,
-                TextColor3             = Theme.Text,
-            }, top)
-            round(b, 10)
-            return b
-        end
-
-        local minBtn   = topButton("-", -92)
-        local closeBtn = topButton("X", -48)
-
-        minBtn.Activated:Connect(function()
-            setOpen(false)
-        end)
-
-        -- fechar precisa de dois toques (evita descarregar sem querer no celular)
-        local closeArmed = false
-        closeBtn.Activated:Connect(function()
-            if closeArmed then
-                if Unload then Unload() end
-                return
-            end
-            closeArmed = true
-            closeBtn.BackgroundColor3 = Theme.Accent
-            closeBtn.BackgroundTransparency = 0.1
-            notify(L("close_confirm"), "triangle-alert", 2.5)
-            task.delay(2.5, function()
-                closeArmed = false
-                if closeBtn.Parent then
-                    closeBtn.BackgroundColor3 = Theme.Element
-                    closeBtn.BackgroundTransparency = ELEMENT_T
-                end
-            end)
-        end)
-
-        -- corpo: barra lateral + conteúdo
-        local body = make("Frame", {
-            Name                   = "Body",
-            Position               = UDim2.fromOffset(0, TOP_H + 1),
-            Size                   = UDim2.new(1, 0, 1, -(TOP_H + 1)),
-            BackgroundTransparency = 1,
-        }, window)
-
-        local side = make("ScrollingFrame", {
-            Name                   = "Side",
-            Position               = UDim2.fromOffset(8, 8),
-            Size                   = UDim2.new(0, sideW, 1, -16),
-            BackgroundColor3       = Theme.Panel,
-            BackgroundTransparency = PANEL_T,
-            BorderSizePixel        = 0,
-            ScrollBarThickness     = 0,
-            CanvasSize             = UDim2.new(0, 0, 0, 0),
-            AutomaticCanvasSize    = Enum.AutomaticSize.Y,
-            ScrollingDirection     = Enum.ScrollingDirection.Y,
-        }, body)
-        round(side, 10)
-        make("UIListLayout", {
-            Padding   = UDim.new(0, 6),
-            SortOrder = Enum.SortOrder.LayoutOrder,
-        }, side)
-        pad(side, 8, 8, 8, 8)
-
-        local content = make("Frame", {
-            Name                   = "Content",
-            Position               = UDim2.fromOffset(sideW + 16, 8),
-            Size                   = UDim2.new(1, -(sideW + 24), 1, -16),
-            BackgroundTransparency = 1,
-            ClipsDescendants       = true,
-        }, body)
-
-        local tabs = {}
-
-        local function selectTab(chosen)
-            for _, t in ipairs(tabs) do
-                local on = (t == chosen)
-                t.page.Visible = on
-                t.btn.BackgroundTransparency = on and 0.15 or 1
-                t.btn.TextColor3 = on and Theme.Text or Theme.SubText
-            end
-        end
-
-        local Win = {}
-
-        function Win.Tab(name)
-            local btn = make("TextButton", {
-                Name                   = name,
-                Size                   = UDim2.new(1, 0, 0, 44),
-                BackgroundColor3       = Theme.Accent,
-                BackgroundTransparency = 1,
-                AutoButtonColor        = false,
-                Text                   = name,
-                Font                   = Enum.Font.GothamMedium,
-                TextSize               = 15,
-                TextColor3             = Theme.SubText,
-                TextXAlignment         = Enum.TextXAlignment.Left,
-                TextTruncate           = Enum.TextTruncate.AtEnd,
-                LayoutOrder            = #tabs + 1,
-            }, side)
-            round(btn, 8)
-            pad(btn, 14, 0, 6, 0)
-
-            local page = make("ScrollingFrame", {
-                Name                   = name,
-                Size                   = UDim2.new(1, 0, 1, 0),
-                BackgroundTransparency = 1,
-                BorderSizePixel        = 0,
-                ScrollBarThickness     = 4,
-                ScrollBarImageColor3   = WHITE,
-                ScrollBarImageTransparency = 0.6,
-                CanvasSize             = UDim2.new(0, 0, 0, 0),
-                AutomaticCanvasSize    = Enum.AutomaticSize.Y,
-                ScrollingDirection     = Enum.ScrollingDirection.Y,
-                Visible                = false,
-            }, content)
-            make("UIListLayout", {
-                Padding   = UDim.new(0, 10),
-                SortOrder = Enum.SortOrder.LayoutOrder,
-            }, page)
-            pad(page, 4, 2, 10, 14)
-
-            local tabObj = { btn = btn, page = page }
-            tabs[#tabs + 1] = tabObj
-
-            btn.Activated:Connect(function()
-                selectTab(tabObj)
-            end)
-            if #tabs == 1 then
-                selectTab(tabObj)
-            end
-
-            local order = 0
-
-            local function row(h)
-                order = order + 1
-                local f = make("Frame", {
-                    Size                   = UDim2.new(1, 0, 0, h),
-                    BackgroundColor3       = Theme.Element,
-                    BackgroundTransparency = ELEMENT_T,
-                    BorderSizePixel        = 0,
-                    LayoutOrder            = order,
-                }, page)
-                round(f, 10)
-                outline(f, 0.9)
-                return f
-            end
-
-            local Tab = {}
-
-            function Tab.Section(title)
-                order = order + 1
-                local s = newText(page, {
-                    Text           = string.upper(title),
-                    Font           = Enum.Font.GothamBold,
-                    TextSize       = 13,
-                    TextColor3     = Theme.SubText,
-                    Size           = UDim2.new(1, 0, 0, 30),
-                    TextYAlignment = Enum.TextYAlignment.Bottom,
-                    LayoutOrder    = order,
-                })
-                pad(s, 6, 0, 0, 4)
-            end
-
-            function Tab.Label(text)
-                order = order + 1
-                local l = newText(page, {
-                    Text           = text,
-                    TextSize       = 15,
-                    TextColor3     = Theme.SubText,
-                    TextWrapped    = true,
-                    Size           = UDim2.new(1, 0, 0, 0),
-                    AutomaticSize  = Enum.AutomaticSize.Y,
-                    TextYAlignment = Enum.TextYAlignment.Top,
-                    LayoutOrder    = order,
-                })
-                pad(l, 6, 2, 6, 2)
-            end
-
-            function Tab.Toggle(title, value, callback)
-                local state = value and true or false
-                local f = row(52)
-
-                newText(f, {
-                    Text     = title,
-                    Position = UDim2.fromOffset(16, 0),
-                    Size     = UDim2.new(1, -90, 1, 0),
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                })
-
-                local trackBar = make("Frame", {
-                    AnchorPoint      = Vector2.new(1, 0.5),
-                    Position         = UDim2.new(1, -16, 0.5, 0),
-                    Size             = UDim2.fromOffset(48, 26),
-                    BackgroundColor3 = Theme.Off,
-                    BorderSizePixel  = 0,
-                }, f)
-                round(trackBar, 13)
-                local knob = make("Frame", {
-                    AnchorPoint      = Vector2.new(0, 0.5),
-                    Position         = UDim2.new(0, 3, 0.5, 0),
-                    Size             = UDim2.fromOffset(20, 20),
-                    BackgroundColor3 = WHITE,
-                    BorderSizePixel  = 0,
-                }, trackBar)
-                round(knob, 10)
-
-                local function paint(animate)
-                    local color = state and Theme.Accent or Theme.Off
-                    local pos   = state and UDim2.new(1, -23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
-                    if animate then
-                        tween(trackBar, 0.15, { BackgroundColor3 = color })
-                        tween(knob, 0.15, { Position = pos })
-                    else
-                        trackBar.BackgroundColor3 = color
-                        knob.Position = pos
-                    end
-                end
-                paint(false)
-
-                local hit = make("TextButton", {
-                    Size                   = UDim2.new(1, 0, 1, 0),
-                    BackgroundTransparency = 1,
-                    AutoButtonColor        = false,
-                    Text                   = "",
-                }, f)
-                hit.Activated:Connect(function()
-                    state = not state
-                    paint(true)
-                    fire(callback, state)
-                end)
-
-                local obj = {}
-                -- muda só o visual (não chama o callback)
-                function obj:Set(v)
-                    state = v and true or false
-                    paint(true)
-                end
-                return obj
-            end
-
-            function Tab.Slider(title, min, max, value, callback)
-                local f = row(70)
-                local current = min
-
-                newText(f, {
-                    Text     = title,
-                    Position = UDim2.fromOffset(16, 8),
-                    Size     = UDim2.new(1, -110, 0, 22),
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                })
-                local valLbl = newText(f, {
-                    Position       = UDim2.new(1, -86, 0, 8),
-                    Size           = UDim2.fromOffset(70, 22),
-                    TextXAlignment = Enum.TextXAlignment.Right,
-                    TextColor3     = Theme.SubText,
-                })
-
-                local hit = make("TextButton", {
-                    Position               = UDim2.new(0, 16, 0, 36),
-                    Size                   = UDim2.new(1, -32, 0, 28),
-                    BackgroundTransparency = 1,
-                    AutoButtonColor        = false,
-                    Text                   = "",
-                }, f)
-                local bar = make("Frame", {
-                    AnchorPoint      = Vector2.new(0, 0.5),
-                    Position         = UDim2.new(0, 0, 0.5, 0),
-                    Size             = UDim2.new(1, 0, 0, 8),
-                    BackgroundColor3 = Theme.Off,
-                    BorderSizePixel  = 0,
-                }, hit)
-                round(bar, 4)
-                local fill = make("Frame", {
-                    Size             = UDim2.new(0, 0, 1, 0),
-                    BackgroundColor3 = Theme.Accent,
-                    BorderSizePixel  = 0,
-                }, bar)
-                round(fill, 4)
-                local knob = make("Frame", {
-                    AnchorPoint      = Vector2.new(0.5, 0.5),
-                    Position         = UDim2.new(0, 0, 0.5, 0),
-                    Size             = UDim2.fromOffset(22, 22),
-                    BackgroundColor3 = WHITE,
-                    BorderSizePixel  = 0,
-                }, bar)
-                round(knob, 11)
-
-                local function apply(v, notifyChange)
-                    v = math.clamp(math.floor((tonumber(v) or min) + 0.5), min, max)
-                    current = v
-                    local alpha = (max > min) and ((v - min) / (max - min)) or 0
-                    fill.Size = UDim2.new(alpha, 0, 1, 0)
-                    knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-                    valLbl.Text = tostring(v)
-                    if notifyChange then
-                        fire(callback, v)
-                    end
-                end
-                apply(value or min, false)
-
-                local function fromX(x)
-                    local w = math.max(hit.AbsoluteSize.X, 1)
-                    local a = math.clamp((x - hit.AbsolutePosition.X) / w, 0, 1)
-                    local v = math.floor(min + a * (max - min) + 0.5)
-                    if v ~= current then
-                        apply(v, true)
-                    end
-                end
-
-                local dragging   = false
-                local startInput = nil
-
-                hit.InputBegan:Connect(function(input)
-                    if dragging or not isPress(input) then return end
-                    dragging   = true
-                    startInput = input
-                    page.ScrollingEnabled = false -- não rola a página enquanto arrasta o slider
-                    fromX(input.Position.X)
-
-                    local conn
-                    conn = input.Changed:Connect(function()
-                        if input.UserInputState == Enum.UserInputState.End then
-                            conn:Disconnect()
-                            dragging = false
-                            page.ScrollingEnabled = true
-                        end
-                    end)
-                end)
-
-                track(UserInputService.InputChanged:Connect(function(input)
-                    if not dragging then return end
-                    if input == startInput or input.UserInputType == Enum.UserInputType.MouseMovement then
-                        fromX(input.Position.X)
-                    end
-                end))
-
-                local obj = {}
-                function obj:Set(v)
-                    apply(v, false)
-                end
-                return obj
-            end
-
-            -- Dropdown: multi = false -> selected é um texto, callback(texto)
-            --           multi = true  -> selected é { [texto] = true }, callback({ [texto] = true })
-            function Tab.Dropdown(title, values, selected, multi, callback)
-                local list    = values or {}
-                local chosen  = {}
-                local single  = nil
-                local open    = false
-                local options = {}
-
-                if multi then
-                    for k, v in pairs(selected or {}) do
-                        if v then chosen[k] = true end
-                    end
-                elseif type(selected) == "string" then
-                    single = selected
-                end
-
-                order = order + 1
-                local box = make("Frame", {
-                    Size                   = UDim2.new(1, 0, 0, 0),
-                    AutomaticSize          = Enum.AutomaticSize.Y,
-                    BackgroundColor3       = Theme.Element,
-                    BackgroundTransparency = ELEMENT_T,
-                    BorderSizePixel        = 0,
-                    LayoutOrder            = order,
-                }, page)
-                round(box, 10)
-                outline(box, 0.9)
-                make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, box)
-
-                local head = make("TextButton", {
-                    Size                   = UDim2.new(1, 0, 0, 52),
-                    BackgroundTransparency = 1,
-                    AutoButtonColor        = false,
-                    Text                   = "",
-                    LayoutOrder            = 1,
-                }, box)
-                newText(head, {
-                    Text     = title,
-                    Position = UDim2.fromOffset(16, 0),
-                    Size     = UDim2.new(0.5, -16, 1, 0),
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                })
-                local sumLbl = newText(head, {
-                    Position       = UDim2.new(0.5, 0, 0, 0),
-                    Size           = UDim2.new(0.5, -48, 1, 0),
-                    TextXAlignment = Enum.TextXAlignment.Right,
-                    TextColor3     = Theme.SubText,
-                    TextTruncate   = Enum.TextTruncate.AtEnd,
-                })
-                local arrow = newText(head, {
-                    Text           = "+",
-                    Font           = Enum.Font.GothamBold,
-                    Position       = UDim2.new(1, -36, 0, 0),
-                    Size           = UDim2.fromOffset(24, 52),
-                    TextXAlignment = Enum.TextXAlignment.Center,
-                    TextColor3     = Theme.SubText,
-                })
-
-                local optFrame = make("Frame", {
-                    Size                   = UDim2.new(1, 0, 0, 0),
-                    AutomaticSize          = Enum.AutomaticSize.Y,
-                    BackgroundTransparency = 1,
-                    Visible                = false,
-                    LayoutOrder            = 2,
-                }, box)
-                make("UIListLayout", {
-                    Padding   = UDim.new(0, 4),
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                }, optFrame)
-                pad(optFrame, 8, 0, 8, 8)
-
-                local function summary()
-                    if multi then
-                        local n = 0
-                        for _, name in ipairs(list) do
-                            if chosen[name] then n = n + 1 end
-                        end
-                        if n == 0 then return L("none") end
-                        return L("selected_n", n)
-                    end
-                    if single and table.find(list, single) then
-                        return single
-                    end
-                    return L("select")
-                end
-
-                local function paint()
-                    for _, o in ipairs(options) do
-                        local on
-                        if multi then
-                            on = chosen[o.name] == true
-                        else
-                            on = (single == o.name)
-                        end
-                        o.mark.BackgroundColor3 = on and Theme.Accent or Theme.Off
-                        o.btn.BackgroundTransparency = on and 0.4 or 0.75
-                    end
-                    sumLbl.Text = summary()
-                end
-
-                local function setOpen(v)
-                    open = v
-                    optFrame.Visible = v
-                    arrow.Text = v and "-" or "+"
-                end
-
-                local function build()
-                    for _, o in ipairs(options) do
-                        pcall(function() o.btn:Destroy() end)
-                    end
-                    options = {}
-
-                    for i, name in ipairs(list) do
-                        local ob = make("TextButton", {
-                            Size                   = UDim2.new(1, 0, 0, 42),
-                            BackgroundColor3       = Theme.Hover,
-                            BackgroundTransparency = 0.75,
-                            AutoButtonColor        = false,
-                            Text                   = "",
-                            LayoutOrder            = i,
-                        }, optFrame)
-                        round(ob, 8)
-                        newText(ob, {
-                            Text         = name,
-                            TextSize     = 15,
-                            Position     = UDim2.fromOffset(14, 0),
-                            Size         = UDim2.new(1, -52, 1, 0),
-                            TextTruncate = Enum.TextTruncate.AtEnd,
-                        })
-                        local mark = make("Frame", {
-                            AnchorPoint      = Vector2.new(1, 0.5),
-                            Position         = UDim2.new(1, -14, 0.5, 0),
-                            Size             = UDim2.fromOffset(18, 18),
-                            BackgroundColor3 = Theme.Off,
-                            BorderSizePixel  = 0,
-                        }, ob)
-                        round(mark, 5)
-
-                        ob.Activated:Connect(function()
-                            if multi then
-                                if chosen[name] then
-                                    chosen[name] = nil
-                                else
-                                    chosen[name] = true
-                                end
-                                paint()
-                                local copy = {}
-                                for k, v in pairs(chosen) do copy[k] = v end
-                                fire(callback, copy)
-                            else
-                                single = name
-                                paint()
-                                setOpen(false)
-                                fire(callback, name)
-                            end
-                        end)
-
-                        options[#options + 1] = { name = name, btn = ob, mark = mark }
-                    end
-                    paint()
-                end
-
-                head.Activated:Connect(function()
-                    setOpen(not open)
-                end)
-
-                build()
-
-                local obj = {}
-                function obj:Refresh(newValues)
-                    list = newValues or {}
-                    build()
-                end
-                return obj
-            end
-
-            function Tab.Keybind(title, key, callback)
-                local f = row(52)
-                local listening = false
-
-                newText(f, {
-                    Text     = title,
-                    Position = UDim2.fromOffset(16, 0),
-                    Size     = UDim2.new(1, -170, 1, 0),
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                })
-                local btnKey = make("TextButton", {
-                    AnchorPoint            = Vector2.new(1, 0.5),
-                    Position               = UDim2.new(1, -12, 0.5, 0),
-                    Size                   = UDim2.fromOffset(136, 36),
-                    BackgroundColor3       = Theme.Hover,
-                    BackgroundTransparency = 0.3,
-                    AutoButtonColor        = false,
-                    Text                   = key.Name,
-                    Font                   = Enum.Font.GothamMedium,
-                    TextSize               = 15,
-                    TextColor3             = Theme.Text,
-                }, f)
-                round(btnKey, 8)
-
-                btnKey.Activated:Connect(function()
-                    if listening then return end
-                    listening = true
-                    UIState.Listening = true
-                    btnKey.Text = L("press_key")
-                end)
-
-                track(UserInputService.InputBegan:Connect(function(input)
-                    if not listening then return end
-                    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-                    listening = false
-                    task.defer(function()
-                        UIState.Listening = false
-                    end)
-                    if input.KeyCode == Enum.KeyCode.Escape then
-                        btnKey.Text = key.Name
-                        return
-                    end
-                    key = input.KeyCode
-                    btnKey.Text = key.Name
-                    fire(callback, key)
-                end))
-            end
-
-            function Tab.Button(title, callback)
-                order = order + 1
-                local b = make("TextButton", {
-                    Size                   = UDim2.new(1, 0, 0, 50),
-                    BackgroundColor3       = Theme.Element,
-                    BackgroundTransparency = ELEMENT_T,
-                    AutoButtonColor        = false,
-                    Text                   = title,
-                    Font                   = Enum.Font.GothamMedium,
-                    TextSize               = 16,
-                    TextColor3             = Theme.Text,
-                    LayoutOrder            = order,
-                }, page)
-                round(b, 10)
-                outline(b, 0.8)
-                b.Activated:Connect(function()
-                    b.BackgroundColor3 = Theme.Accent
-                    b.BackgroundTransparency = 0.2
-                    tween(b, 0.3, { BackgroundColor3 = Theme.Element, BackgroundTransparency = ELEMENT_T })
-                    fire(callback)
-                end)
-            end
-
-            return Tab
-        end
-
-        -- tecla do menu: abre/fecha
-        track(UserInputService.InputBegan:Connect(function(input, processed)
-            if processed or UIState.Listening then return end
-            if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == State.MenuKey then
-                setOpen(not window.Visible)
-            end
-        end))
-
-        function Win.SetOpen(v)
-            setOpen(v)
-        end
-
-        return Win
+        return Options[idx]
     end
 
-    local function addToggle(tab, title, key, onChange)
-        return tab.Toggle(title, State[key], function(v)
-            State[key] = v and true or false
-            if onChange then onChange(v) end
-        end)
-    end
+    -- ───────────── MAIN ─────────────
+    local InfoBox = TabMain:AddLeftGroupbox(L("sec_info"), "info")
+    InfoBox:AddLabel(L("info_author"), true)
+    InfoBox:AddLabel(L("info_menu"), true)
 
-    local function addSlider(tab, title, key, min, max)
-        return tab.Slider(title, min, max, math.clamp(State[key], min, max), function(v)
-            State[key] = tonumber(v) or State[key]
-        end)
-    end
+    -- ───────────── PLAYER ─────────────
+    local MoveBox = TabPlayer:AddLeftGroupbox(L("sec_move"), "move")
+    addToggle(MoveBox, L("cframe"), "CFrameOn")
+    addSlider(MoveBox, L("cframe_speed"), "CFrameSpeed", 5, 100)
+    addToggle(MoveBox, L("inf_jump"), "InfJump")
+    addToggle(MoveBox, L("noclip"), "Noclip")
 
-    buildUI = function()
-        destroyUI()
-        setupNotify()
-
-        local Window = createWindow({
-            Title  = "Buk",
-            Author = "by Linesketon02",
-        })
-
-        local MainTab     = Window.Tab(L("tab_main"))
-        local PlayerTab   = Window.Tab(L("tab_player"))
-        local VisualsTab  = Window.Tab(L("tab_visuals"))
-        local PickTab     = Window.Tab(L("tab_pick"))
-        local FarmTab     = Window.Tab(L("tab_farm"))
-        local SheriffTab  = Window.Tab(L("tab_sheriff"))
-        local TrollTab    = Window.Tab(L("tab_troll"))
-        local EmotesTab   = Window.Tab(L("tab_emotes"))
-        local SettingsTab = Window.Tab(L("tab_settings"))
-
-        -- ───────────── MAIN ─────────────
-        MainTab.Section(L("sec_info"))
-        MainTab.Label(L("info_author"))
-        MainTab.Label(L("info_menu"))
-
-        -- ───────────── PLAYER ─────────────
-        PlayerTab.Section(L("sec_move"))
-        addToggle(PlayerTab, L("cframe"), "CFrameOn")
-        addSlider(PlayerTab, L("cframe_speed"), "CFrameSpeed", 5, 100)
-        addToggle(PlayerTab, L("inf_jump"), "InfJump")
-        addToggle(PlayerTab, L("noclip"), "Noclip")
-
-        PlayerTab.Section(L("sec_protect"))
-        addToggle(PlayerTab, L("anti_fling"), "AntiFling", function(v)
-            if not v then
-                restoreBackup(antiBackup)
-            end
-        end)
-
-        -- ───────────── VISUALS ─────────────
-        VisualsTab.Section(L("sec_name"))
-        addToggle(VisualsTab, L("esp_name"), "EspName")
-
-        VisualsTab.Section(L("sec_roles"))
-        addToggle(VisualsTab, L("role_inn"),  "RoleInnocent")
-        addToggle(VisualsTab, L("role_sher"), "RoleSheriff")
-        addToggle(VisualsTab, L("role_murd"), "RoleMurderer")
-
-        -- Itens e Setas: um único menu com as 3 opções (marque quantas quiser)
-        VisualsTab.Section(L("sec_items"))
-
-        local ITEM_OPTIONS = {
-            { label = L("gun_drop"),      key = "GunDrop"      },
-            { label = L("arrow_murder"),  key = "ArrowMurder"  },
-            { label = L("arrow_sheriff"), key = "ArrowSheriff" },
-        }
-        local itemValues   = {}
-        local itemSelected = {}
-        for _, it in ipairs(ITEM_OPTIONS) do
-            itemValues[#itemValues + 1] = it.label
-            if State[it.key] then
-                itemSelected[it.label] = true
-            end
+    local ProtectBox = TabPlayer:AddRightGroupbox(L("sec_protect"), "shield")
+    addToggle(ProtectBox, L("anti_fling"), "AntiFling", function(v)
+        if not v then
+            restoreBackup(antiBackup)
         end
+    end)
 
-        VisualsTab.Dropdown(L("items_dd"), itemValues, itemSelected, true, function(chosen)
-            for _, it in ipairs(ITEM_OPTIONS) do
-                State[it.key] = chosen[it.label] == true
+    -- ───────────── VISUALS (ESP) ─────────────
+    local NameBox = TabVisuals:AddLeftGroupbox(L("sec_name"), "tag")
+    addToggle(NameBox, L("esp_name"), "EspName")
+
+    local RolesBox = TabVisuals:AddLeftGroupbox(L("sec_roles"), "users")
+    addToggle(RolesBox, L("role_inn"),  "RoleInnocent")
+    addToggle(RolesBox, L("role_sher"), "RoleSheriff")
+    addToggle(RolesBox, L("role_murd"), "RoleMurderer")
+
+    local ItemsBox = TabVisuals:AddRightGroupbox(L("sec_items"), "locate")
+    addToggle(ItemsBox, L("gun_drop"),      "GunDrop")
+    addToggle(ItemsBox, L("arrow_murder"),  "ArrowMurder")
+    addToggle(ItemsBox, L("arrow_sheriff"), "ArrowSheriff")
+
+    -- ───────────── WEAPON ─────────────
+    local PickBox = TabPick:AddLeftGroupbox(L("sec_pick"), "hand")
+    addToggle(PickBox, L("pick_auto"), "PickAuto")
+    addToggle(PickBox, L("pick_screen"), "PickButton", setPickButtonVisible)
+
+    local PickPcBox = TabPick:AddRightGroupbox(L("sec_pick_pc"), "keyboard")
+    addToggle(PickPcBox, L("pick_key_on"), "PickKeyOn")
+    PickPcBox:AddLabel(L("pick_key")):AddKeyPicker("PickKey", {
+        Default         = State.PickKey.Name,
+        Mode            = "Toggle",
+        NoUI            = true,
+        Text            = L("pick_key"),
+        ChangedCallback = function(keyCode)
+            if uiReady and typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
+                State.PickKey = keyCode
             end
-        end)
+        end,
+    })
 
-        -- ───────────── WEAPON ─────────────
-        PickTab.Section(L("sec_pick"))
-        addToggle(PickTab, L("pick_auto"), "PickAuto")
-        addToggle(PickTab, L("pick_screen"), "PickButton", setPickButtonVisible)
+    -- ───────────── AUTO FARM ─────────────
+    -- (o Auto Farm nunca liga sozinho na próxima execução)
+    local FarmBox = TabFarm:AddLeftGroupbox(L("sec_farm"), "coins")
+    addToggle(FarmBox, L("farm_on"), "FarmOn")
+    addSlider(FarmBox, L("farm_limit"), "FarmLimit", 10, 60)
+    addToggle(FarmBox, L("farm_safe"), "FarmSafe")
+    addToggle(FarmBox, L("farm_reset"), "FarmReset")
 
-        PickTab.Section(L("sec_pick_pc"))
-        addToggle(PickTab, L("pick_key_on"), "PickKeyOn")
-        PickTab.Keybind(L("pick_key"), State.PickKey, function(keyCode)
-            State.PickKey = keyCode
-        end)
-
-        -- ───────────── AUTO FARM ─────────────
-        -- (o Auto Farm nunca liga sozinho na próxima execução)
-        FarmTab.Section(L("sec_farm"))
-        addToggle(FarmTab, L("farm_on"), "FarmOn")
-        addSlider(FarmTab, L("farm_limit"), "FarmLimit", 10, 60)
-        addToggle(FarmTab, L("farm_safe"), "FarmSafe")
-        addToggle(FarmTab, L("farm_reset"), "FarmReset")
-
-        -- ───────────── SHERIFF ─────────────
-        SheriffTab.Section(L("sec_magic"))
-        addToggle(SheriffTab, L("magic"), "MagicBullet", function(v)
-            if v then
-                if not installAimHook() then
-                    notify(L("no_hook"), "triangle-alert", 4)
-                end
-            else
-                magicAim = nil
+    -- ───────────── AIMBOT MM2 ─────────────
+    local MagicBox = TabSheriff:AddLeftGroupbox(L("sec_magic"), "crosshair")
+    addToggle(MagicBox, L("magic"), "MagicBullet", function(v)
+        if v then
+            if not installAimHook() then
+                notify(L("no_hook"), "triangle-alert", 4)
             end
-        end)
-        SheriffTab.Dropdown(
-            L("magic_part"),
-            { L("part_torso"), L("part_head") },
-            (State.AimPart == "Head") and L("part_head") or L("part_torso"),
-            false,
-            function(option)
-                if option == L("part_head") then
-                    State.AimPart = "Head"
-                elseif option == L("part_torso") then
-                    State.AimPart = "Torso"
-                end
+        else
+            magicAim = nil
+        end
+    end)
+    MagicBox:AddDropdown("AimPart", {
+        Values   = { L("part_torso"), L("part_head") },
+        Default  = (State.AimPart == "Head") and L("part_head") or L("part_torso"),
+        Multi    = false,
+        Text     = L("magic_part"),
+        Callback = function(option)
+            if not uiReady then return end
+            if option == L("part_head") then
+                State.AimPart = "Head"
+            elseif option == L("part_torso") then
+                State.AimPart = "Torso"
             end
-        )
-        addToggle(SheriffTab, L("magic_predict"), "AimPredict")
+        end,
+    })
+    addToggle(MagicBox, L("magic_predict"), "AimPredict")
 
-        SheriffTab.Section(L("sec_wall"))
-        addToggle(SheriffTab, L("wall_shot"), "WallShot", function(v)
-            if v then
-                if not installAimHook() then
-                    notify(L("no_hook"), "triangle-alert", 4)
-                end
-            else
-                Aim.clearTags()
+    local WallBox = TabSheriff:AddRightGroupbox(L("sec_wall"), "brick-wall")
+    addToggle(WallBox, L("wall_shot"), "WallShot", function(v)
+        if v then
+            if not installAimHook() then
+                notify(L("no_hook"), "triangle-alert", 4)
             end
-        end)
+        else
+            Aim.clearTags()
+        end
+    end)
 
-        SheriffTab.Section(L("sec_autopick"))
-        addToggle(SheriffTab, L("autopick_gun"), "AutoPickGun")
+    local AutoPickBox = TabSheriff:AddRightGroupbox(L("sec_autopick"), "hand")
+    addToggle(AutoPickBox, L("autopick_gun"), "AutoPickGun")
 
-        -- ───────────── TROLL ─────────────
-        -- 1) Fling (liga/desliga)   2) Escolher o player   3) Velocidade sempre no máximo
-        TrollTab.Section(L("sec_fling"))
+    -- ───────────── TROLL ─────────────
+    -- 1) Fling (liga/desliga)   2) Escolher o player   3) Velocidade sempre no máximo
+    local FlingBox = TabTroll:AddLeftGroupbox(L("sec_fling"), "zap")
 
-        FlingToggle = addToggle(TrollTab, L("fling"), "Fling", function(v)
-            if v then
-                local ok, reason = startFling()
-                if not ok then
-                    State.Fling = false
-                    local key = (reason == "dead" and "fling_dead")
-                        or (reason == "tdead" and "fling_tdead")
-                        or (reason == "norole" and "fling_norole")
-                        or "fling_notarget"
-                    notify(L(key), "triangle-alert", 3)
-                    task.defer(function()
-                        if FlingToggle then
-                            FlingToggle:Set(false)
-                        end
-                    end)
-                end
-            else
-                stopFling()
+    addToggle(FlingBox, L("fling"), "Fling", function(v)
+        if v then
+            local ok, reason = startFling()
+            if not ok then
+                State.Fling = false
+                local key = (reason == "dead" and "fling_dead")
+                    or (reason == "tdead" and "fling_tdead")
+                    or (reason == "norole" and "fling_norole")
+                    or "fling_notarget"
+                notify(L(key), "triangle-alert", 3)
+                task.defer(function()
+                    if FlingToggle then
+                        FlingToggle:Set(false)
+                    end
+                end)
             end
-        end)
-
-        local flingNames = flingValues()
-        FlingDropdown = TrollTab.Dropdown(
-            L("fling_player"),
-            flingNames,
-            (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and State.FlingTarget or nil,
-            false,
-            function(option)
-                if type(option) == "string" then
-                    State.FlingTarget = option
-                end
+        else
+            stopFling()
+        end
+    end)
+    -- o resto do script chama FlingToggle:Set(false) quando o Fling termina sozinho
+    FlingToggle = {
+        Set = function(_, v)
+            local t = Toggles["T_Fling"]
+            if t then
+                t:SetValue(v and true or false)
             end
-        )
+        end,
+    }
 
-        -- ───────────── EMOTES ─────────────
-        EmotesTab.Section(L("sec_copy"))
-
-        local emoteNames = flingList()
-        EmoteDropdown = EmotesTab.Dropdown(
-            L("copy_player"),
-            emoteNames,
-            (EmoteTarget and table.find(emoteNames, EmoteTarget)) and EmoteTarget or nil,
-            false,
-            function(option)
-                if type(option) == "string" then
-                    EmoteTarget = option
-                end
+    local flingNames = flingValues()
+    FlingBox:AddDropdown("FlingTarget", {
+        Values     = flingNames,
+        Default    = (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and State.FlingTarget or nil,
+        Multi      = false,
+        Searchable = true,
+        Text       = L("fling_player"),
+        Callback   = function(option)
+            if type(option) == "string" then
+                State.FlingTarget = option
             end
-        )
+        end,
+    })
+    FlingDropdown = {
+        Refresh = function(_, values)
+            local d = Options["FlingTarget"]
+            if d then
+                d:SetValues(values)
+            end
+        end,
+    }
 
-        EmotesTab.Button(L("copy_refresh"), function()
+    -- ───────────── COPY ANIMATION ─────────────
+    local CopyBox = TabEmotes:AddLeftGroupbox(L("sec_copy"), "copy")
+
+    local emoteNames = flingList()
+    CopyBox:AddDropdown("EmoteTarget", {
+        Values     = emoteNames,
+        Default    = (EmoteTarget and table.find(emoteNames, EmoteTarget)) and EmoteTarget or nil,
+        Multi      = false,
+        Searchable = true,
+        Text       = L("copy_player"),
+        Callback   = function(option)
+            if type(option) == "string" then
+                EmoteTarget = option
+            end
+        end,
+    })
+    EmoteDropdown = {
+        Refresh = function(_, values)
+            local d = Options["EmoteTarget"]
+            if d then
+                d:SetValues(values)
+            end
+        end,
+    }
+
+    CopyBox:AddButton({
+        Text = L("copy_refresh"),
+        Func = function()
             refreshEmoteList()
-        end)
-        EmotesTab.Button(L("copy_btn"), function()
+        end,
+    })
+    CopyBox:AddButton({
+        Text = L("copy_btn"),
+        Func = function()
             local ok, reason = copyAnimationFrom(EmoteTarget)
             if ok then
                 notify(L(reason == "saved" and "copy_saved" or "copy_ok"), "check", 2.5)
@@ -3818,15 +2974,21 @@ local function defineUI()
                     or "copy_noplayer"
                 notify(L(key), "triangle-alert", 3)
             end
-        end)
-        EmotesTab.Button(L("copy_restore"), function()
+        end,
+    })
+    CopyBox:AddButton({
+        Text = L("copy_restore"),
+        Func = function()
             if restoreAnimation() then
                 notify(L("copy_restored"), "check", 2.5)
             end
-        end)
+        end,
+    })
 
-        EmotesTab.Section(L("sec_saved"))
-        EmotesTab.Button(L("saved_use"), function()
+    local SavedBox = TabEmotes:AddRightGroupbox(L("sec_saved"), "save")
+    SavedBox:AddButton({
+        Text = L("saved_use"),
+        Func = function()
             if not savedAnim then
                 notify(L("saved_none"), "triangle-alert", 3)
             elseif applyAnimIds(savedAnim) then
@@ -3835,18 +2997,49 @@ local function defineUI()
             else
                 notify(L("copy_dead"), "triangle-alert", 3)
             end
-        end)
-        EmotesTab.Button(L("saved_remove"), function()
+        end,
+    })
+    SavedBox:AddButton({
+        Text = L("saved_remove"),
+        Func = function()
             removeAnimFile()
             notify(L("saved_removed"), "check", 2.5)
-        end)
+        end,
+    })
 
-        -- ───────────── SETTINGS ─────────────
-        SettingsTab.Section(L("sec_menu"))
-        SettingsTab.Keybind(L("menu_key"), State.MenuKey, function(keyCode)
-            State.MenuKey = keyCode
-        end)
-        SettingsTab.Button(L("save_btn"), function()
+    -- ───────────── SETTINGS ─────────────
+    local MenuBox = TabSettings:AddLeftGroupbox(L("sec_menu"), "settings")
+    MenuBox:AddLabel(L("menu_key")):AddKeyPicker("MenuKeybind", {
+        Default         = State.MenuKey.Name,
+        Mode            = "Toggle",
+        NoUI            = true,
+        Text            = L("menu_key"),
+        ChangedCallback = function(keyCode)
+            if uiReady and typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
+                State.MenuKey = keyCode
+            end
+        end,
+    })
+    Library.ToggleKeybind = Options["MenuKeybind"]
+
+    MenuBox:AddDropdown("DPIScale", {
+        Values   = { "50%", "75%", "100%", "125%", "150%" },
+        Default  = "100%",
+        Text     = "DPI Scale",
+        Callback = function(value)
+            if not uiReady then return end
+            local n = tonumber((tostring(value):gsub("%%", "")))
+            if n then
+                pcall(function()
+                    Library:SetDPIScale(n)
+                end)
+            end
+        end,
+    })
+
+    MenuBox:AddButton({
+        Text = L("save_btn"),
+        Func = function()
             if not Compat.files then
                 notify(L("no_files"), "triangle-alert", 3)
                 return
@@ -3856,14 +3049,35 @@ local function defineUI()
             else
                 notify(L("save_fail_text"), "triangle-alert", 3)
             end
-        end)
-        SettingsTab.Button(L("unload_btn"), function()
+        end,
+    })
+    MenuBox:AddButton({
+        Text        = L("unload_btn"),
+        DoubleClick = true,
+        Func        = function()
             Unload()
+        end,
+    })
+
+    -- Temas da Obsidian (opcional: se não baixar, o resto funciona igual)
+    local ThemeManager = fetchModule("addons/ThemeManager.lua")
+    if ThemeManager then
+        pcall(function()
+            ThemeManager:SetLibrary(Library)
+            ThemeManager:SetFolder("Buk")
+            ThemeManager:ApplyToTab(TabSettings)
         end)
     end
-end
 
-defineUI()
+    -- se o usuário descarregar pela própria biblioteca, descarrega o script também
+    Library:OnUnload(function()
+        if alive then
+            Unload()
+        end
+    end)
+
+    uiReady = true
+end
 
 -- ═══════════════════════════════════════════════════════════
 --  16. FINALIZAÇÃO
@@ -3921,3 +3135,4 @@ if okBuild then
 else
     showError(errBuild)
 end
+
