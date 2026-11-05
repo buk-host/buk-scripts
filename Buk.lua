@@ -2,12 +2,12 @@
     ╔══════════════════════════════════════╗
     ║  Buk                                 ║
     ║  Developed by: Linesketon02          ║
-    ║  UI: Obsidian                        ║
+    ║  UI: Luna Interface Suite            ║
     ╚══════════════════════════════════════╝
 
     Abas: Main | Player | ESP | Weapon | Auto Farm | Aimbot MM2 | Troll | Copy Animation | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
-    Celular: botões "Toggle" (abrir/fechar) e "Lock" (travar arrastar) aparecem no canto da tela
+    Celular: fechar a janela (X) deixa um botão flutuante para abrir de novo
 ]]
 
 -- ═══════════════════════════════════════════════════════════
@@ -163,8 +163,8 @@ local STR = {
         save_fail_text = "Couldn't save the settings.",
         no_files = "Your executor can't save files (writefile).",
         sec_info = "Info", info_author = "Developed by: Linesketon02",
-        info_menu = "Mobile: use the Toggle button on the screen to open/close the menu. PC: use the Menu Key (Settings > Menu Key).",
-        close_confirm = "Tap X again to close the script.",
+        info_menu = "Tap X to hide the menu. On mobile a floating button appears to open it again. On PC use the Menu Key (Settings > Menu Key).",
+        close_confirm = "Tap again to unload the script.",
         none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
     },
 }
@@ -2648,45 +2648,31 @@ track(Players.PlayerRemoving:Connect(function(p)
 end))
 
 -- ═══════════════════════════════════════════════════════════
---  15. INTERFACE (Obsidian UI)
---  Biblioteca Obsidian: funciona em PC e celular.
---  No celular aparecem os botões "Toggle" (abrir/fechar o menu)
---  e "Lock" (travar o arrastar da janela).
+--  15. INTERFACE (Luna Interface Suite)
+--  Biblioteca Luna: funciona em PC e celular.
+--  Fechar a janela (X) no celular deixa um botão flutuante para abrir
+--  de novo; no PC use a tecla do menu (Settings > Menu Key).
 -- ═══════════════════════════════════════════════════════════
-local OBSIDIAN_REPO = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local ObsidianLib   = nil
+local LUNA_URL = "https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/master/source.lua"
+local LunaLib  = nil
 local buildUI, Unload, destroyUI
 
--- Baixa e executa um módulo da Obsidian (devolve nil + motivo se falhar)
-local function fetchModule(path)
-    local okGet, body = pcall(function()
-        return game:HttpGet(OBSIDIAN_REPO .. path)
-    end)
-    if not okGet or type(body) ~= "string" or #body == 0 then
-        return nil, "could not download " .. path
-    end
-
-    local fn, compileErr = loadstring(body)
-    if not fn then
-        return nil, "could not compile " .. path .. ": " .. tostring(compileErr)
-    end
-
-    local okRun, result = pcall(fn)
-    if not okRun then
-        return nil, "could not run " .. path .. ": " .. tostring(result)
-    end
-    return result
-end
+-- ícones dos avisos (Material, os nomes que a Luna conhece)
+local NOTIFY_ICONS = {
+    ["check"]          = "check_circle",
+    ["triangle-alert"] = "report_problem",
+    ["save"]           = "save",
+}
 
 destroyUI = function()
     NotifyImpl = nil
     FlingDropdown, FlingToggle, EmoteDropdown = nil, nil, nil
 
-    local lib = ObsidianLib
-    ObsidianLib = nil
-    if lib and not lib.Unloaded then
+    local lib = LunaLib
+    LunaLib = nil
+    if lib then
         pcall(function()
-            lib:Unload()
+            lib:Destroy()
         end)
     end
 end
@@ -2694,149 +2680,186 @@ end
 buildUI = function()
     destroyUI()
 
-    local Library, libErr = fetchModule("Library.lua")
-    if not Library then
-        error("Obsidian UI: " .. tostring(libErr))
-    end
-    ObsidianLib = Library
+    -- evita o aviso de "Luna deprecated" da própria biblioteca
+    genv.ConfirmLuna = true
 
-    local Options = Library.Options
-    local Toggles = Library.Toggles
+    local okGet, body = pcall(function()
+        return game:HttpGet(LUNA_URL, true)
+    end)
+    if not okGet or type(body) ~= "string" or #body == 0 then
+        error("Luna UI: could not download the library (check your internet / executor HttpGet)")
+    end
+    local chunk, compileErr = loadstring(body)
+    if not chunk then
+        error("Luna UI: could not compile the library: " .. tostring(compileErr))
+    end
+    local okRun, Luna = pcall(chunk)
+    if not okRun or type(Luna) ~= "table" then
+        error("Luna UI: could not start the library: " .. tostring(Luna))
+    end
+    LunaLib = Luna
+
     local uiReady = false -- evita que callbacks da criação mexam no State
 
-    -- Avisos (usa as notificações da Obsidian)
+    -- Avisos (usa as notificações da Luna)
     NotifyImpl = function(text, icon, duration)
-        local data = {
+        Luna:Notification({
             Title       = "Buk",
-            Description = tostring(text),
-            Time        = duration or 3,
-        }
-        if icon then
-            data.Icon = icon
-        end
-        local ok = pcall(function()
-            Library:Notify(data)
-        end)
-        if not ok then
-            data.Icon = nil
-            Library:Notify(data)
-        end
+            Content     = tostring(text),
+            Icon        = NOTIFY_ICONS[icon] or "info",
+            ImageSource = "Material",
+            Duration    = duration or 3,
+        })
     end
 
     -- ───────────── JANELA ─────────────
-    local Window = Library:CreateWindow({
-        Title            = "Buk",
-        Footer           = "by Linesketon02",
-        NotifySide       = "Right",
-        ShowCustomCursor = false,
-        ToggleKeybind    = State.MenuKey,
-        Size             = Library.IsMobile and UDim2.fromOffset(560, 300) or UDim2.fromOffset(660, 440),
+    local Window = Luna:CreateWindow({
+        Name           = "Buk",
+        Subtitle       = "by Linesketon02",
+        LoadingEnabled = false,
+        KeySystem      = false,
+        ConfigSettings = { ConfigFolder = "Buk" },
     })
+    Window.Bind = State.MenuKey
 
-    local TabMain     = Window:AddTab(L("tab_main"), "house")
-    local TabPlayer   = Window:AddTab(L("tab_player"), "user")
-    local TabVisuals  = Window:AddTab(L("tab_visuals"), "eye")
-    local TabPick     = Window:AddTab(L("tab_pick"), "hand")
-    local TabFarm     = Window:AddTab(L("tab_farm"), "coins")
-    local TabSheriff  = Window:AddTab(L("tab_sheriff"), "crosshair")
-    local TabTroll    = Window:AddTab(L("tab_troll"), "zap")
-    local TabEmotes   = Window:AddTab(L("tab_emotes"), "copy")
-    local TabSettings = Window:AddTab(L("tab_settings"), "settings")
+    local function newTab(titleKey, icon)
+        return Window:CreateTab({
+            Name        = L(titleKey),
+            Icon        = icon,
+            ImageSource = "Material",
+            ShowTitle   = true,
+        })
+    end
+
+    local TabMain     = newTab("tab_main", "home")
+    local TabPlayer   = newTab("tab_player", "person")
+    local TabVisuals  = newTab("tab_visuals", "visibility")
+    local TabPick     = newTab("tab_pick", "pan_tool")
+    local TabFarm     = newTab("tab_farm", "monetization_on")
+    local TabSheriff  = newTab("tab_sheriff", "gps_fixed")
+    local TabTroll    = newTab("tab_troll", "bolt")
+    local TabEmotes   = newTab("tab_emotes", "content_copy")
+    local TabSettings = newTab("tab_settings", "settings")
 
     -- ───────────── ajudantes ─────────────
-    local function addToggle(box, title, key, onChange)
-        local idx = "T_" .. key
-        box:AddToggle(idx, {
-            Text     = title,
-            Default  = State[key] == true,
-            Callback = function(v)
+    local function addToggle(sec, title, key, onChange)
+        return sec:CreateToggle({
+            Name         = title,
+            CurrentValue = State[key] == true,
+            Callback     = function(v)
                 if not uiReady then return end
                 State[key] = v and true or false
                 if onChange then onChange(v) end
             end,
         })
-        return Toggles[idx]
     end
 
-    local function addSlider(box, title, key, min, max)
-        local idx = "S_" .. key
-        box:AddSlider(idx, {
-            Text     = title,
-            Default  = math.clamp(State[key], min, max),
-            Min      = min,
-            Max      = max,
-            Rounding = 0,
-            Callback = function(v)
+    local function addSlider(sec, title, key, min, max)
+        return sec:CreateSlider({
+            Name         = title,
+            Range        = { min, max },
+            Increment    = 1,
+            CurrentValue = math.clamp(State[key], min, max),
+            Callback     = function(v)
                 if not uiReady then return end
                 State[key] = tonumber(v) or State[key]
             end,
         })
-        return Options[idx]
+    end
+
+    -- Atualiza a lista de um dropdown de jogadores mantendo a seleção atual
+    -- (a Luna exige uma opção válida ao trocar a lista)
+    local function refreshPlayerDropdown(obj, guard, values, current, adopt)
+        if not obj then return end
+
+        local list = {}
+        for _, v in ipairs(values) do
+            list[#list + 1] = v
+        end
+        if current and not table.find(list, current) then
+            list[#list + 1] = current
+        end
+        if #list == 0 then
+            list[1] = L("none")
+        end
+
+        local chosen = (current and table.find(list, current)) and current or list[1]
+        guard.busy = true
+        pcall(function()
+            obj:Set({ Options = list, CurrentOption = { chosen } })
+        end)
+        guard.busy = false
+
+        if current == nil and chosen ~= L("none") then
+            adopt(chosen)
+        end
     end
 
     -- ───────────── MAIN ─────────────
-    local InfoBox = TabMain:AddLeftGroupbox(L("sec_info"), "info")
-    InfoBox:AddLabel(L("info_author"), true)
-    InfoBox:AddLabel(L("info_menu"), true)
+    local InfoSec = TabMain:CreateSection(L("sec_info"))
+    InfoSec:CreateLabel({ Text = L("info_author"), Style = 1 })
+    InfoSec:CreateLabel({ Text = L("info_menu"), Style = 2 })
 
     -- ───────────── PLAYER ─────────────
-    local MoveBox = TabPlayer:AddLeftGroupbox(L("sec_move"), "move")
-    addToggle(MoveBox, L("cframe"), "CFrameOn")
-    addSlider(MoveBox, L("cframe_speed"), "CFrameSpeed", 5, 100)
-    addToggle(MoveBox, L("inf_jump"), "InfJump")
-    addToggle(MoveBox, L("noclip"), "Noclip")
+    local MoveSec = TabPlayer:CreateSection(L("sec_move"))
+    addToggle(MoveSec, L("cframe"), "CFrameOn")
+    addSlider(MoveSec, L("cframe_speed"), "CFrameSpeed", 5, 100)
+    addToggle(MoveSec, L("inf_jump"), "InfJump")
+    addToggle(MoveSec, L("noclip"), "Noclip")
 
-    local ProtectBox = TabPlayer:AddRightGroupbox(L("sec_protect"), "shield")
-    addToggle(ProtectBox, L("anti_fling"), "AntiFling", function(v)
+    local ProtectSec = TabPlayer:CreateSection(L("sec_protect"))
+    addToggle(ProtectSec, L("anti_fling"), "AntiFling", function(v)
         if not v then
             restoreBackup(antiBackup)
         end
     end)
 
     -- ───────────── VISUALS (ESP) ─────────────
-    local NameBox = TabVisuals:AddLeftGroupbox(L("sec_name"), "tag")
-    addToggle(NameBox, L("esp_name"), "EspName")
+    local NameSec = TabVisuals:CreateSection(L("sec_name"))
+    addToggle(NameSec, L("esp_name"), "EspName")
 
-    local RolesBox = TabVisuals:AddLeftGroupbox(L("sec_roles"), "users")
-    addToggle(RolesBox, L("role_inn"),  "RoleInnocent")
-    addToggle(RolesBox, L("role_sher"), "RoleSheriff")
-    addToggle(RolesBox, L("role_murd"), "RoleMurderer")
+    local RolesSec = TabVisuals:CreateSection(L("sec_roles"))
+    addToggle(RolesSec, L("role_inn"),  "RoleInnocent")
+    addToggle(RolesSec, L("role_sher"), "RoleSheriff")
+    addToggle(RolesSec, L("role_murd"), "RoleMurderer")
 
-    local ItemsBox = TabVisuals:AddRightGroupbox(L("sec_items"), "locate")
-    addToggle(ItemsBox, L("gun_drop"),      "GunDrop")
-    addToggle(ItemsBox, L("arrow_murder"),  "ArrowMurder")
-    addToggle(ItemsBox, L("arrow_sheriff"), "ArrowSheriff")
+    local ItemsSec = TabVisuals:CreateSection(L("sec_items"))
+    addToggle(ItemsSec, L("gun_drop"),      "GunDrop")
+    addToggle(ItemsSec, L("arrow_murder"),  "ArrowMurder")
+    addToggle(ItemsSec, L("arrow_sheriff"), "ArrowSheriff")
 
     -- ───────────── WEAPON ─────────────
-    local PickBox = TabPick:AddLeftGroupbox(L("sec_pick"), "hand")
-    addToggle(PickBox, L("pick_auto"), "PickAuto")
-    addToggle(PickBox, L("pick_screen"), "PickButton", setPickButtonVisible)
+    local PickSec = TabPick:CreateSection(L("sec_pick"))
+    addToggle(PickSec, L("pick_auto"), "PickAuto")
+    addToggle(PickSec, L("pick_screen"), "PickButton", setPickButtonVisible)
 
-    local PickPcBox = TabPick:AddRightGroupbox(L("sec_pick_pc"), "keyboard")
-    addToggle(PickPcBox, L("pick_key_on"), "PickKeyOn")
-    PickPcBox:AddLabel(L("pick_key")):AddKeyPicker("PickKey", {
-        Default         = State.PickKey.Name,
-        Mode            = "Toggle",
-        NoUI            = true,
-        Text            = L("pick_key"),
-        ChangedCallback = function(keyCode)
-            if uiReady and typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
-                State.PickKey = keyCode
+    local PickPcSec = TabPick:CreateSection(L("sec_pick_pc"))
+    addToggle(PickPcSec, L("pick_key_on"), "PickKeyOn")
+    PickPcSec:CreateBind({
+        Name             = L("pick_key"),
+        CurrentBind      = State.PickKey.Name,
+        HoldToInteract   = false,
+        Callback         = function() end, -- quem pega a arma é o próprio script
+        OnChangedCallback = function(bind)
+            if not uiReady then return end
+            local kc = toKeyCode(bind)
+            if kc then
+                State.PickKey = kc
             end
         end,
     })
 
     -- ───────────── AUTO FARM ─────────────
     -- (o Auto Farm nunca liga sozinho na próxima execução)
-    local FarmBox = TabFarm:AddLeftGroupbox(L("sec_farm"), "coins")
-    addToggle(FarmBox, L("farm_on"), "FarmOn")
-    addSlider(FarmBox, L("farm_limit"), "FarmLimit", 10, 60)
-    addToggle(FarmBox, L("farm_safe"), "FarmSafe")
-    addToggle(FarmBox, L("farm_reset"), "FarmReset")
+    local FarmSec = TabFarm:CreateSection(L("sec_farm"))
+    addToggle(FarmSec, L("farm_on"), "FarmOn")
+    addSlider(FarmSec, L("farm_limit"), "FarmLimit", 10, 60)
+    addToggle(FarmSec, L("farm_safe"), "FarmSafe")
+    addToggle(FarmSec, L("farm_reset"), "FarmReset")
 
     -- ───────────── AIMBOT MM2 ─────────────
-    local MagicBox = TabSheriff:AddLeftGroupbox(L("sec_magic"), "crosshair")
-    addToggle(MagicBox, L("magic"), "MagicBullet", function(v)
+    local MagicSec = TabSheriff:CreateSection(L("sec_magic"))
+    addToggle(MagicSec, L("magic"), "MagicBullet", function(v)
         if v then
             if not installAimHook() then
                 notify(L("no_hook"), "triangle-alert", 4)
@@ -2845,12 +2868,12 @@ buildUI = function()
             magicAim = nil
         end
     end)
-    MagicBox:AddDropdown("AimPart", {
-        Values   = { L("part_torso"), L("part_head") },
-        Default  = (State.AimPart == "Head") and L("part_head") or L("part_torso"),
-        Multi    = false,
-        Text     = L("magic_part"),
-        Callback = function(option)
+    MagicSec:CreateDropdown({
+        Name            = L("magic_part"),
+        Options         = { L("part_torso"), L("part_head") },
+        CurrentOption   = { (State.AimPart == "Head") and L("part_head") or L("part_torso") },
+        MultipleOptions = false,
+        Callback        = function(option)
             if not uiReady then return end
             if option == L("part_head") then
                 State.AimPart = "Head"
@@ -2859,10 +2882,10 @@ buildUI = function()
             end
         end,
     })
-    addToggle(MagicBox, L("magic_predict"), "AimPredict")
+    addToggle(MagicSec, L("magic_predict"), "AimPredict")
 
-    local WallBox = TabSheriff:AddRightGroupbox(L("sec_wall"), "brick-wall")
-    addToggle(WallBox, L("wall_shot"), "WallShot", function(v)
+    local WallSec = TabSheriff:CreateSection(L("sec_wall"))
+    addToggle(WallSec, L("wall_shot"), "WallShot", function(v)
         if v then
             if not installAimHook() then
                 notify(L("no_hook"), "triangle-alert", 4)
@@ -2872,14 +2895,14 @@ buildUI = function()
         end
     end)
 
-    local AutoPickBox = TabSheriff:AddRightGroupbox(L("sec_autopick"), "hand")
-    addToggle(AutoPickBox, L("autopick_gun"), "AutoPickGun")
+    local AutoPickSec = TabSheriff:CreateSection(L("sec_autopick"))
+    addToggle(AutoPickSec, L("autopick_gun"), "AutoPickGun")
 
     -- ───────────── TROLL ─────────────
     -- 1) Fling (liga/desliga)   2) Escolher o player   3) Velocidade sempre no máximo
-    local FlingBox = TabTroll:AddLeftGroupbox(L("sec_fling"), "zap")
+    local FlingSec = TabTroll:CreateSection(L("sec_fling"))
 
-    addToggle(FlingBox, L("fling"), "Fling", function(v)
+    local flingToggleObj = addToggle(FlingSec, L("fling"), "Fling", function(v)
         if v then
             local ok, reason = startFling()
             if not ok then
@@ -2902,69 +2925,68 @@ buildUI = function()
     -- o resto do script chama FlingToggle:Set(false) quando o Fling termina sozinho
     FlingToggle = {
         Set = function(_, v)
-            local t = Toggles["T_Fling"]
-            if t then
-                t:SetValue(v and true or false)
-            end
+            pcall(function()
+                flingToggleObj:Set({ CurrentValue = v and true or false })
+            end)
         end,
     }
 
+    local flingGuard = { busy = false }
     local flingNames = flingValues()
-    FlingBox:AddDropdown("FlingTarget", {
-        Values     = flingNames,
-        Default    = (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and State.FlingTarget or nil,
-        Multi      = false,
-        Searchable = true,
-        Text       = L("fling_player"),
-        Callback   = function(option)
+    local flingObj = FlingSec:CreateDropdown({
+        Name            = L("fling_player"),
+        Options         = flingNames,
+        CurrentOption   = (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and { State.FlingTarget } or {},
+        MultipleOptions = false,
+        Callback        = function(option)
+            if flingGuard.busy then return end
             if type(option) == "string" then
-                State.FlingTarget = option
+                State.FlingTarget = (option ~= L("none")) and option or nil
             end
         end,
     })
     FlingDropdown = {
         Refresh = function(_, values)
-            local d = Options["FlingTarget"]
-            if d then
-                d:SetValues(values)
-            end
+            refreshPlayerDropdown(flingObj, flingGuard, values, State.FlingTarget, function(v)
+                State.FlingTarget = v
+            end)
         end,
     }
 
     -- ───────────── COPY ANIMATION ─────────────
-    local CopyBox = TabEmotes:AddLeftGroupbox(L("sec_copy"), "copy")
+    local CopySec = TabEmotes:CreateSection(L("sec_copy"))
 
+    local emoteGuard = { busy = false }
     local emoteNames = flingList()
-    CopyBox:AddDropdown("EmoteTarget", {
-        Values     = emoteNames,
-        Default    = (EmoteTarget and table.find(emoteNames, EmoteTarget)) and EmoteTarget or nil,
-        Multi      = false,
-        Searchable = true,
-        Text       = L("copy_player"),
-        Callback   = function(option)
+    local emoteObj = CopySec:CreateDropdown({
+        Name            = L("copy_player"),
+        Options         = emoteNames,
+        CurrentOption   = (EmoteTarget and table.find(emoteNames, EmoteTarget)) and { EmoteTarget } or {},
+        MultipleOptions = false,
+        Callback        = function(option)
+            if emoteGuard.busy then return end
             if type(option) == "string" then
-                EmoteTarget = option
+                EmoteTarget = (option ~= L("none")) and option or nil
             end
         end,
     })
     EmoteDropdown = {
         Refresh = function(_, values)
-            local d = Options["EmoteTarget"]
-            if d then
-                d:SetValues(values)
-            end
+            refreshPlayerDropdown(emoteObj, emoteGuard, values, EmoteTarget, function(v)
+                EmoteTarget = v
+            end)
         end,
     }
 
-    CopyBox:AddButton({
-        Text = L("copy_refresh"),
-        Func = function()
+    CopySec:CreateButton({
+        Name     = L("copy_refresh"),
+        Callback = function()
             refreshEmoteList()
         end,
     })
-    CopyBox:AddButton({
-        Text = L("copy_btn"),
-        Func = function()
+    CopySec:CreateButton({
+        Name     = L("copy_btn"),
+        Callback = function()
             local ok, reason = copyAnimationFrom(EmoteTarget)
             if ok then
                 notify(L(reason == "saved" and "copy_saved" or "copy_ok"), "check", 2.5)
@@ -2976,19 +2998,19 @@ buildUI = function()
             end
         end,
     })
-    CopyBox:AddButton({
-        Text = L("copy_restore"),
-        Func = function()
+    CopySec:CreateButton({
+        Name     = L("copy_restore"),
+        Callback = function()
             if restoreAnimation() then
                 notify(L("copy_restored"), "check", 2.5)
             end
         end,
     })
 
-    local SavedBox = TabEmotes:AddRightGroupbox(L("sec_saved"), "save")
-    SavedBox:AddButton({
-        Text = L("saved_use"),
-        Func = function()
+    local SavedSec = TabEmotes:CreateSection(L("sec_saved"))
+    SavedSec:CreateButton({
+        Name     = L("saved_use"),
+        Callback = function()
             if not savedAnim then
                 notify(L("saved_none"), "triangle-alert", 3)
             elseif applyAnimIds(savedAnim) then
@@ -2999,47 +3021,34 @@ buildUI = function()
             end
         end,
     })
-    SavedBox:AddButton({
-        Text = L("saved_remove"),
-        Func = function()
+    SavedSec:CreateButton({
+        Name     = L("saved_remove"),
+        Callback = function()
             removeAnimFile()
             notify(L("saved_removed"), "check", 2.5)
         end,
     })
 
     -- ───────────── SETTINGS ─────────────
-    local MenuBox = TabSettings:AddLeftGroupbox(L("sec_menu"), "settings")
-    MenuBox:AddLabel(L("menu_key")):AddKeyPicker("MenuKeybind", {
-        Default         = State.MenuKey.Name,
-        Mode            = "Toggle",
-        NoUI            = true,
-        Text            = L("menu_key"),
-        ChangedCallback = function(keyCode)
-            if uiReady and typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
-                State.MenuKey = keyCode
-            end
-        end,
-    })
-    Library.ToggleKeybind = Options["MenuKeybind"]
-
-    MenuBox:AddDropdown("DPIScale", {
-        Values   = { "50%", "75%", "100%", "125%", "150%" },
-        Default  = "100%",
-        Text     = "DPI Scale",
-        Callback = function(value)
+    local MenuSec = TabSettings:CreateSection(L("sec_menu"))
+    MenuSec:CreateBind({
+        Name             = L("menu_key"),
+        CurrentBind      = State.MenuKey.Name,
+        HoldToInteract   = false,
+        Callback         = function() end,
+        OnChangedCallback = function(bind)
             if not uiReady then return end
-            local n = tonumber((tostring(value):gsub("%%", "")))
-            if n then
-                pcall(function()
-                    Library:SetDPIScale(n)
-                end)
+            local kc = toKeyCode(bind)
+            if kc then
+                State.MenuKey = kc
+                Window.Bind   = kc
             end
         end,
     })
 
-    MenuBox:AddButton({
-        Text = L("save_btn"),
-        Func = function()
+    MenuSec:CreateButton({
+        Name     = L("save_btn"),
+        Callback = function()
             if not Compat.files then
                 notify(L("no_files"), "triangle-alert", 3)
                 return
@@ -3051,30 +3060,23 @@ buildUI = function()
             end
         end,
     })
-    MenuBox:AddButton({
-        Text        = L("unload_btn"),
-        DoubleClick = true,
-        Func        = function()
-            Unload()
+
+    -- Unload: toque duas vezes (evita fechar sem querer)
+    local unloadArmed = false
+    MenuSec:CreateButton({
+        Name     = L("unload_btn"),
+        Callback = function()
+            if unloadArmed then
+                Unload()
+                return
+            end
+            unloadArmed = true
+            notify(L("close_confirm"), "triangle-alert", 2.5)
+            task.delay(3, function()
+                unloadArmed = false
+            end)
         end,
     })
-
-    -- Temas da Obsidian (opcional: se não baixar, o resto funciona igual)
-    local ThemeManager = fetchModule("addons/ThemeManager.lua")
-    if ThemeManager then
-        pcall(function()
-            ThemeManager:SetLibrary(Library)
-            ThemeManager:SetFolder("Buk")
-            ThemeManager:ApplyToTab(TabSettings)
-        end)
-    end
-
-    -- se o usuário descarregar pela própria biblioteca, descarrega o script também
-    Library:OnUnload(function()
-        if alive then
-            Unload()
-        end
-    end)
 
     uiReady = true
 end
