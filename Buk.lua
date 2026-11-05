@@ -2,12 +2,12 @@
     ╔══════════════════════════════════════╗
     ║  Buk                                 ║
     ║  Developed by: Linesketon02          ║
-    ║  UI: Luna Interface Suite            ║
+    ║  UI: WindUI                          ║
     ╚══════════════════════════════════════╝
 
-    Abas: Main | Player | ESP | Weapon | Auto Farm | Aimbot MM2 | Troll | Copy Animation | Settings
+    Abas: Main | Player | ESP | Weapon | Auto Farm | Aimbot MM2 | Troll | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
-    Celular: botão flutuante "BUK" abre/fecha o menu (arraste para mudar de lugar)
+    Celular: minimize a janela e use o botão "BUK" (arrastável) para abrir de novo
 ]]
 
 -- ═══════════════════════════════════════════════════════════
@@ -118,7 +118,7 @@ local Lang = "en"
 local STR = {
     en = {
         tab_main = "Main", tab_player = "Player", tab_visuals = "ESP", tab_pick = "Weapon", tab_farm = "Auto Farm",
-        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_emotes = "Copy Animation", tab_settings = "Settings",
+        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_settings = "Settings",
         sec_move = "Movement", sec_protect = "Protection",
         cframe = "CFrame", cframe_speed = "CFrame Speed", inf_jump = "Infinite Jump",
         noclip = "Noclip", anti_fling = "Anti-Fling",
@@ -136,15 +136,6 @@ local STR = {
         magic_predict = "Prediction (ping compensation)",
         sec_wall = "Shoot Through Walls", wall_shot = "Shoot Through Walls",
         sec_autopick = "Auto Pick", autopick_gun = "Auto Pick Dropped Gun",
-        sec_copy = "Copy", sec_saved = "Saved Animation", copy_player = "Select Player",
-        copy_refresh = "Refresh Player List", copy_btn = "Copy Animation",
-        copy_restore = "Restore My Animation",
-        copy_ok = "Animation copied!", copy_saved = "Animation copied and saved!",
-        saved_use = "Use Saved Animation", saved_remove = "Remove Saved Animation",
-        saved_used = "Saved animation applied!", saved_none = "No saved animation.",
-        saved_removed = "Saved animation removed.", copy_restored = "Animation restored.",
-        copy_noplayer = "Select a player first.", copy_dead = "You need to be alive.",
-        copy_noanim = "Couldn't read that player's animation.",
         sec_fling = "Fling", fling = "Fling", fling_player = "Select Player",
         fling_notarget = "Select a player first.", fling_dead = "You need to be alive.",
         fling_norole = "No Sheriff/Murderer in the match right now.",
@@ -163,8 +154,7 @@ local STR = {
         save_fail_text = "Couldn't save the settings.",
         no_files = "Your executor can't save files (writefile).",
         sec_info = "Info", info_author = "Developed by: Linesketon02",
-        info_menu = "Tap the BUK floating button to hide or show the menu (drag it to move). The X button hides the menu too. On PC you can also use the Menu Key (Settings > Menu Key).",
-        float_lock = "Lock BUK Button Position",
+        info_menu = "Minimize the window to hide the menu and tap the BUK button to open it again (you can drag the button). On PC you can also use the Menu Key (Settings > Menu Key).",
         close_confirm = "Tap again to unload the script.",
         none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
     },
@@ -226,10 +216,7 @@ local State = {
     Fling = false,
 
     -- Menu
-    MenuKey    = Enum.KeyCode.RightShift,
-    BukBtnX    = 0.93,  -- posição do botão flutuante BUK (fração da largura da tela)
-    BukBtnY    = 0.30,  -- posição do botão flutuante BUK (fração da altura da tela)
-    BukBtnLock = false, -- trava o botão BUK (não deixa arrastar)
+    MenuKey = Enum.KeyCode.RightShift,
 }
 
 -- true enquanto o Fling está rodando (pausa Noclip, Anti-Fling, CFrame e Auto Farm)
@@ -375,7 +362,6 @@ local SAVE_KEYS = {
     "CFrameOn", "CFrameSpeed", "InfJump", "Noclip", "AntiFling",
     "MagicBullet", "WallShot", "AimPart", "AimPredict", "AutoPickGun",
     "FarmSafe", "FarmLimit", "FarmReset",
-    "BukBtnX", "BukBtnY", "BukBtnLock",
 }
 
 local function saveConfig()
@@ -2463,585 +2449,138 @@ do
 end
 
 -- ═══════════════════════════════════════════════════════════
---  14C. EMOTES: copiar a animação de outro jogador
---  - Lê as animações (idle, walk, run, jump, fall, climb) do jogador
---    escolhido e aplica em você. Não precisa de ID nem de compra.
---  - Reaplica sozinho quando você renasce. "Restore" volta ao normal.
---  Obs.: só toca se a animação for pública (pacotes oficiais do Roblox).
+--  15. INTERFACE (WindUI)
+--  Minimize a janela e use o botão "BUK" (botão de abrir da WindUI,
+--  arrastável) para abrir de novo. No PC use também a tecla do menu
+--  (Settings > Menu Key).
 -- ═══════════════════════════════════════════════════════════
-local copiedAnim     = nil -- ["pasta/nome"] = AnimationId
-local animBackup     = nil -- [Animation] = AnimationId original
-local animBackupChar = nil
-local EmoteDropdown  = nil
-local EmoteTarget    = nil
-
--- Animação salva em arquivo (continua depois de fechar o script)
-local ANIM_FILE = "Buk_Animation.json"
-local savedAnim = nil
-
-local function saveAnimFile(ids)
-    if not Compat.files then return false end
-    return (pcall(function()
-        writefile(ANIM_FILE, HttpService:JSONEncode(ids))
-    end))
-end
-
-local function loadAnimFile()
-    if not Compat.files then return nil end
-    local ok, data = pcall(function()
-        if not isfile(ANIM_FILE) then return nil end
-        local t = HttpService:JSONDecode(readfile(ANIM_FILE))
-        if type(t) ~= "table" then return nil end
-        local ids, n = {}, 0
-        for k, v in pairs(t) do
-            if type(k) == "string" and type(v) == "string" then
-                ids[k] = v
-                n = n + 1
-            end
-        end
-        if n > 0 then
-            return ids
-        end
-        return nil
-    end)
-    if ok then
-        return data
-    end
-    return nil
-end
-
-local function removeAnimFile()
-    savedAnim = nil
-    if not Compat.files then return end
-    pcall(function()
-        if type(delfile) == "function" then
-            if isfile(ANIM_FILE) then
-                delfile(ANIM_FILE)
-            end
-        else
-            writefile(ANIM_FILE, "{}")
-        end
-    end)
-end
-
-savedAnim = loadAnimFile()
-
-local function readAnimIds(char)
-    local animate = char and char:FindFirstChild("Animate")
-    if not animate then return nil end
-    local ids, n = {}, 0
-    for _, d in ipairs(animate:GetDescendants()) do
-        if d:IsA("Animation") and d.AnimationId ~= "" then
-            ids[d.Parent.Name .. "/" .. d.Name] = d.AnimationId
-            n = n + 1
-        end
-    end
-    if n > 0 then
-        return ids
-    end
-    return nil
-end
-
-local function reloadAnimate(hum, animate)
-    pcall(function()
-        animate.Disabled = true
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-                t:Stop(0)
-            end
-        end
-        task.wait()
-        animate.Disabled = false
-    end)
-end
-
-local function applyAnimIds(ids)
-    local char    = LocalPlayer.Character
-    local hum     = char and char:FindFirstChildOfClass("Humanoid")
-    local animate = char and char:FindFirstChild("Animate")
-    if not (hum and animate and hum.Health > 0) then
-        return false
-    end
-
-    if animBackupChar ~= char then
-        animBackupChar = char
-        animBackup = {}
-        for _, d in ipairs(animate:GetDescendants()) do
-            if d:IsA("Animation") then
-                animBackup[d] = d.AnimationId
-            end
-        end
-    end
-
-    for _, d in ipairs(animate:GetDescendants()) do
-        if d:IsA("Animation") then
-            local id = ids[d.Parent.Name .. "/" .. d.Name]
-            if id then
-                d.AnimationId = id
-            end
-        end
-    end
-
-    reloadAnimate(hum, animate)
-    return true
-end
-
--- Retorna: ok (bool) e o motivo ("noplayer" | "noanim" | "dead")
-local function copyAnimationFrom(name)
-    if not name then
-        return false, "noplayer"
-    end
-    local p = Players:FindFirstChild(name)
-    local ids = p and readAnimIds(p.Character)
-    if not ids then
-        return false, "noanim"
-    end
-    if not applyAnimIds(ids) then
-        return false, "dead"
-    end
-    copiedAnim = ids
-    savedAnim  = ids
-    if saveAnimFile(ids) then
-        return true, "saved"
-    end
-    return true, "nosave"
-end
-
-local function restoreAnimation()
-    copiedAnim = nil
-    local char    = LocalPlayer.Character
-    local hum     = char and char:FindFirstChildOfClass("Humanoid")
-    local animate = char and char:FindFirstChild("Animate")
-    if hum and animate and animBackupChar == char and animBackup then
-        for d, id in pairs(animBackup) do
-            if d.Parent then
-                d.AnimationId = id
-            end
-        end
-        reloadAnimate(hum, animate)
-        return true
-    end
-    return false
-end
-
--- Renasceu? Aplica a animação copiada de novo
-track(LocalPlayer.CharacterAdded:Connect(function(char)
-    if not copiedAnim then return end
-    task.spawn(function()
-        local animate = char:WaitForChild("Animate", 10)
-        if not animate then return end
-        task.wait(0.6)
-        if alive and copiedAnim and LocalPlayer.Character == char then
-            pcall(applyAnimIds, copiedAnim)
-        end
-    end)
-end))
-
-local function refreshEmoteList(leaving)
-    if not EmoteDropdown then return end
-    pcall(function()
-        EmoteDropdown:Refresh(flingList(leaving))
-    end)
-end
-
-track(Players.PlayerAdded:Connect(function()
-    refreshEmoteList()
-end))
-track(Players.PlayerRemoving:Connect(function(p)
-    refreshEmoteList(p)
-end))
-
--- ═══════════════════════════════════════════════════════════
---  15. INTERFACE (Luna Interface Suite)
---  Biblioteca Luna: funciona em PC e celular.
---  Fechar a janela (X) no celular deixa um botão flutuante para abrir
---  de novo; no PC use a tecla do menu (Settings > Menu Key).
--- ═══════════════════════════════════════════════════════════
-local LUNA_URL = "https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/master/source.lua"
-local LunaLib  = nil
+local WINDUI_URLS = {
+    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
+}
+local WindUILib    = nil
+local WindUIWindow = nil
 local buildUI, Unload, destroyUI
 
--- ícones dos avisos (Material, os nomes que a Luna conhece)
-local NOTIFY_ICONS = {
-    ["check"]          = "check_circle",
-    ["triangle-alert"] = "report_problem",
-    ["save"]           = "save",
-}
-
-
--- ───────────── OCULTAR/MOSTRAR A INTERFACE + BOTÃO FLUTUANTE "BUK" ─────────────
--- A Luna, quando oculta a janela, deixa peças soltas na tela (barra de arrastar,
--- sombra, blur) que continuam pegando toque: era o "negócio invisível".
--- Aqui o script esconde TUDO da Luna por conta própria (menos os avisos) e o
--- botão BUK abre/fecha o menu. O X da janela e a tecla do menu usam o mesmo caminho.
-local INERT_KEY = Enum.KeyCode.World95 -- tecla que ninguém aperta (desliga o atalho interno da Luna)
-local BUK_W, BUK_H = 64, 38
-local BUK_DRAG_MIN = 10
-
-local LunaGui    = nil  -- ScreenGui da Luna
-local BukGui     = nil  -- ScreenGui do botão BUK
-local BukBtn     = nil
-local BukStroke  = nil
-local menuOpen   = true
-local hiddenGui  = {}   -- [peça da Luna] = Visible de antes de ocultar
-local hiddenBlur = {}   -- pastas "LunaBlur" da câmera retiradas enquanto o menu está oculto
-local menuConns  = {}
-
-local function findLunaGui()
-    local roots = {}
-    if gethui then
-        local ok, h = pcall(gethui)
-        if ok and typeof(h) == "Instance" then
-            roots[#roots + 1] = h
-        end
-    end
-    local okCore, core = pcall(function()
-        return game:GetService("CoreGui")
-    end)
-    if okCore and core then
-        roots[#roots + 1] = core
-        local rg = core:FindFirstChild("RobloxGui")
-        if rg then
-            roots[#roots + 1] = rg
-        end
-    end
-    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if pg then
-        roots[#roots + 1] = pg
-    end
-
-    local fallback = nil
-    for _, root in ipairs(roots) do
-        local okList, kids = pcall(function()
-            return root:GetChildren()
+local function loadWindUI()
+    local lastErr = "no url worked"
+    for _, url in ipairs(WINDUI_URLS) do
+        local okGet, body = pcall(function()
+            return game:HttpGet(url, true)
         end)
-        if okList then
-            for _, g in ipairs(kids) do
-                if g:IsA("ScreenGui") and g.Name ~= "Luna-Old" and g:FindFirstChild("SmartWindow") then
-                    local okT, title = pcall(function()
-                        return g.SmartWindow.Title.Title.Text
-                    end)
-                    if okT and title == "Buk" then
-                        return g
-                    end
-                    fallback = fallback or g
+        if okGet and type(body) == "string" and #body > 0 then
+            local chunk, compileErr = loadstring(body)
+            if chunk then
+                local okRun, lib = pcall(chunk)
+                if okRun and type(lib) == "table" then
+                    return lib
                 end
-            end
-        end
-    end
-    return fallback
-end
-
-local function setLunaShown(show)
-    local gui = LunaGui
-    if not gui or not gui.Parent then return end
-
-    if show then
-        for obj, was in pairs(hiddenGui) do
-            if obj.Parent then
-                pcall(function()
-                    obj.Visible = was
-                end)
-            end
-        end
-        table.clear(hiddenGui)
-
-        local cam = Workspace.CurrentCamera
-        for folder in pairs(hiddenBlur) do
-            if cam then
-                pcall(function()
-                    folder.Parent = cam
-                end)
-            end
-        end
-        table.clear(hiddenBlur)
-    else
-        for _, child in ipairs(gui:GetChildren()) do
-            if child:IsA("GuiObject") and child.Name ~= "Notifications" and hiddenGui[child] == nil then
-                hiddenGui[child] = child.Visible
-                child.Visible = false
-            end
-        end
-
-        -- vidro/blur que a Luna desenha na câmera
-        local cam = Workspace.CurrentCamera
-        if cam then
-            for _, f in ipairs(cam:GetChildren()) do
-                if f.Name == "LunaBlur" then
-                    hiddenBlur[f] = true
-                    pcall(function()
-                        f.Parent = nil
-                    end)
-                end
-            end
-        end
-    end
-end
-
-local function refreshBukButton()
-    if not BukBtn then return end
-    pcall(function()
-        BukStroke.Color = menuOpen and ACCENT or NAME_NEUTRAL
-        BukBtn.TextColor3 = menuOpen and WHITE or Color3.fromRGB(200, 205, 225)
-    end)
-end
-
-local function setMenuOpen(open)
-    menuOpen = open and true or false
-    setLunaShown(menuOpen)
-    refreshBukButton()
-end
-
-local function buildBukButton()
-    local cam = Workspace.CurrentCamera
-    local vp  = cam and cam.ViewportSize or Vector2.new(1280, 720)
-
-    BukGui = newScreenGui("BukFloatGui", 2000000000)
-
-    BukBtn = Instance.new("TextButton")
-    BukBtn.Name = "BukFloatButton"
-    BukBtn.AnchorPoint = Vector2.new(0.5, 0.5)
-    BukBtn.Position = UDim2.fromOffset(
-        math.clamp(State.BukBtnX * vp.X, BUK_W / 2, vp.X - BUK_W / 2),
-        math.clamp(State.BukBtnY * vp.Y, BUK_H / 2, vp.Y - BUK_H / 2)
-    )
-    BukBtn.Size = UDim2.fromOffset(BUK_W, BUK_H)
-    BukBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    BukBtn.BackgroundTransparency = 0.1
-    BukBtn.AutoButtonColor = false
-    BukBtn.Font = Enum.Font.GothamBold
-    BukBtn.TextSize = 16
-    BukBtn.TextColor3 = WHITE
-    BukBtn.Text = "BUK"
-    BukBtn.Parent = BukGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = BukBtn
-
-    BukStroke = Instance.new("UIStroke")
-    BukStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    BukStroke.Color = ACCENT
-    BukStroke.Thickness = 2
-    BukStroke.Transparency = 0.1
-    BukStroke.Parent = BukBtn
-
-    -- Arrastar move o botão (sem sair da tela); tocar sem arrastar abre/fecha o menu
-    local dragging, moved = false, false
-    local dragInput, dragStart, startCenter = nil, nil, nil
-
-    menuConns[#menuConns + 1] = BukBtn.InputBegan:Connect(function(input)
-        local t = input.UserInputType
-        if t ~= Enum.UserInputType.Touch and t ~= Enum.UserInputType.MouseButton1 then
-            return
-        end
-
-        dragging    = true
-        moved       = false
-        dragInput   = input
-        dragStart   = input.Position
-        startCenter = Vector2.new(BukBtn.Position.X.Offset, BukBtn.Position.Y.Offset)
-
-        local conn
-        conn = input.Changed:Connect(function()
-            if input.UserInputState ~= Enum.UserInputState.End then return end
-            conn:Disconnect()
-            dragging = false
-
-            if moved then
-                local c2 = Workspace.CurrentCamera
-                local v2 = c2 and c2.ViewportSize or Vector2.new(1280, 720)
-                State.BukBtnX = BukBtn.Position.X.Offset / math.max(v2.X, 1)
-                State.BukBtnY = BukBtn.Position.Y.Offset / math.max(v2.Y, 1)
+                lastErr = tostring(lib)
             else
-                setMenuOpen(not menuOpen)
+                lastErr = tostring(compileErr)
             end
-        end)
-    end)
-
-    menuConns[#menuConns + 1] = UserInputService.InputChanged:Connect(function(input)
-        if not dragging or not dragInput or State.BukBtnLock then return end
-
-        if dragInput.UserInputType == Enum.UserInputType.Touch then
-            if input ~= dragInput then return end
-        elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then
-            return
+        else
+            lastErr = tostring(body)
         end
-
-        local delta = input.Position - dragStart
-        if delta.Magnitude > BUK_DRAG_MIN then
-            moved = true
-        end
-        if moved then
-            local c2   = Workspace.CurrentCamera
-            local v2   = c2 and c2.ViewportSize or Vector2.new(1280, 720)
-            local half = Vector2.new(BUK_W, BUK_H) / 2
-            local nx = math.clamp(startCenter.X + delta.X, half.X, v2.X - half.X)
-            local ny = math.clamp(startCenter.Y + delta.Y, half.Y, v2.Y - half.Y)
-            BukBtn.Position = UDim2.fromOffset(nx, ny)
-        end
-    end)
-
-    refreshBukButton()
-end
-
-local function hookLunaControls()
-    local gui = LunaGui
-    if not gui then return end
-
-    -- X da janela: usa o ocultar do script (o da Luna deixa peças soltas na tela)
-    pcall(function()
-        local close = gui.SmartWindow.Controls.Close
-        local shield = Instance.new("TextButton")
-        shield.Name = "BukCloseShield"
-        shield.BackgroundTransparency = 1
-        shield.Size = UDim2.fromScale(1, 1)
-        shield.Text = ""
-        shield.AutoButtonColor = false
-        shield.ZIndex = 1000
-        shield.Parent = close
-        menuConns[#menuConns + 1] = shield.Activated:Connect(function()
-            setMenuOpen(false)
-        end)
-    end)
-
-    -- o botão de celular da própria Luna fica sempre escondido (quem abre é o BUK)
-    pcall(function()
-        local ms = gui:FindFirstChild("MobileSupport")
-        if ms then
-            ms.Visible = false
-            menuConns[#menuConns + 1] = ms:GetPropertyChangedSignal("Visible"):Connect(function()
-                if ms.Visible then
-                    ms.Visible = false
-                end
-            end)
-        end
-    end)
-
-    -- Tecla do menu (PC)
-    menuConns[#menuConns + 1] = UserInputService.InputBegan:Connect(function(input, processed)
-        if processed then return end
-        if input.KeyCode == State.MenuKey then
-            setMenuOpen(not menuOpen)
-        end
-    end)
+    end
+    error("WindUI: could not load the library (check your internet / executor HttpGet): " .. lastErr)
 end
 
 destroyUI = function()
     NotifyImpl = nil
-    FlingDropdown, FlingToggle, EmoteDropdown = nil, nil, nil
+    FlingDropdown, FlingToggle = nil, nil
 
-    for _, c in ipairs(menuConns) do
+    local win = WindUIWindow
+    WindUIWindow = nil
+    WindUILib = nil
+    if win then
         pcall(function()
-            c:Disconnect()
+            win:Destroy()
         end)
     end
-    table.clear(menuConns)
-
-    for f in pairs(hiddenBlur) do
-        pcall(function()
-            f:Destroy()
-        end)
-    end
-    table.clear(hiddenBlur)
-    table.clear(hiddenGui)
-
-    pcall(function()
-        if BukGui then
-            BukGui:Destroy()
-        end
-    end)
-    BukGui, BukBtn, BukStroke = nil, nil, nil
-    menuOpen = true
-
-    local gui = LunaGui
-    LunaGui = nil
-
-    local lib = LunaLib
-    LunaLib = nil
-    if lib then
-        pcall(function()
-            lib:Destroy()
-        end)
-    end
-    pcall(function()
-        if gui then
-            gui:Destroy()
-        end
-    end)
 end
 
 buildUI = function()
     destroyUI()
 
-    -- evita o aviso de "Luna deprecated" da própria biblioteca
-    genv.ConfirmLuna = true
-
-    local okGet, body = pcall(function()
-        return game:HttpGet(LUNA_URL, true)
-    end)
-    if not okGet or type(body) ~= "string" or #body == 0 then
-        error("Luna UI: could not download the library (check your internet / executor HttpGet)")
-    end
-    local chunk, compileErr = loadstring(body)
-    if not chunk then
-        error("Luna UI: could not compile the library: " .. tostring(compileErr))
-    end
-    local okRun, Luna = pcall(chunk)
-    if not okRun or type(Luna) ~= "table" then
-        error("Luna UI: could not start the library: " .. tostring(Luna))
-    end
-    LunaLib = Luna
+    local WindUI = loadWindUI()
+    WindUILib = WindUI
 
     local uiReady = false -- evita que callbacks da criação mexam no State
 
-    -- Avisos (usa as notificações da Luna)
+    -- Avisos (usa as notificações da WindUI; os ícones são nomes do Lucide)
     NotifyImpl = function(text, icon, duration)
-        Luna:Notification({
-            Title       = "Buk",
-            Content     = tostring(text),
-            Icon        = NOTIFY_ICONS[icon] or "info",
-            ImageSource = "Material",
-            Duration    = duration or 3,
+        WindUI:Notify({
+            Title    = "Buk",
+            Content  = tostring(text),
+            Icon     = icon or "info",
+            Duration = duration or 3,
         })
     end
 
     -- ───────────── JANELA ─────────────
-    local Window = Luna:CreateWindow({
-        Name           = "Buk",
-        Subtitle       = "by Linesketon02",
-        LoadingEnabled = false,
-        KeySystem      = false,
-        ConfigSettings = { ConfigFolder = "Buk" },
+    local Window = WindUI:CreateWindow({
+        Title        = "Buk",
+        Author       = "by Linesketon02",
+        Folder       = "Buk",
+        Icon         = "skull",
+        Theme        = "Dark",
+        Transparent  = true,
+        Size         = UDim2.fromOffset(500, 330),
+        SideBarWidth = 170,
     })
-    Window.Bind = INERT_KEY -- o atalho de teclado agora é do script (ocultar sem sobras na tela)
+    if not Window then
+        error("WindUI: could not create the window (another WindUI window may already be open)")
+    end
+    WindUIWindow = Window
+
+    -- Botão de abrir com o nome BUK (arrastável, aparece em PC e celular)
+    pcall(function()
+        Window:EditOpenButton({
+            Title      = "BUK",
+            Enabled    = true,
+            Draggable  = true,
+            OnlyMobile = false,
+        })
+    end)
+    pcall(function()
+        Window:SetToggleKey(State.MenuKey)
+    end)
 
     local function newTab(titleKey, icon)
-        return Window:CreateTab({
-            Name        = L(titleKey),
-            Icon        = icon,
-            ImageSource = "Material",
-            ShowTitle   = true,
+        return Window:Tab({
+            Title = L(titleKey),
+            Icon  = icon,
         })
     end
 
     local TabMain     = newTab("tab_main", "home")
-    local TabPlayer   = newTab("tab_player", "person")
-    local TabVisuals  = newTab("tab_visuals", "visibility")
-    local TabPick     = newTab("tab_pick", "pan_tool")
-    local TabFarm     = newTab("tab_farm", "monetization_on")
-    local TabSheriff  = newTab("tab_sheriff", "gps_fixed")
-    local TabTroll    = newTab("tab_troll", "bolt")
-    local TabEmotes   = newTab("tab_emotes", "content_copy")
+    local TabPlayer   = newTab("tab_player", "user")
+    local TabVisuals  = newTab("tab_visuals", "eye")
+    local TabPick     = newTab("tab_pick", "crosshair")
+    local TabFarm     = newTab("tab_farm", "coins")
+    local TabSheriff  = newTab("tab_sheriff", "target")
+    local TabTroll    = newTab("tab_troll", "zap")
     local TabSettings = newTab("tab_settings", "settings")
 
     -- ───────────── ajudantes ─────────────
+    -- Seção da WindUI (se a versão não tiver seção com elementos, usa a própria aba)
+    local function newSection(tab, title)
+        local ok, sec = pcall(function()
+            return tab:Section({ Title = title, Opened = true })
+        end)
+        if ok and type(sec) == "table" and type(sec.Toggle) == "function" then
+            return sec
+        end
+        return tab
+    end
+
     local function addToggle(sec, title, key, onChange)
-        return sec:CreateToggle({
-            Name         = title,
-            CurrentValue = State[key] == true,
-            Callback     = function(v)
+        return sec:Toggle({
+            Title    = title,
+            Value    = State[key] == true,
+            Default  = State[key] == true,
+            Callback = function(v)
                 if not uiReady then return end
                 State[key] = v and true or false
                 if onChange then onChange(v) end
@@ -3050,59 +2589,29 @@ buildUI = function()
     end
 
     local function addSlider(sec, title, key, min, max)
-        return sec:CreateSlider({
-            Name         = title,
-            Range        = { min, max },
-            Increment    = 1,
-            CurrentValue = math.clamp(State[key], min, max),
-            Callback     = function(v)
+        return sec:Slider({
+            Title    = title,
+            Step     = 1,
+            Value    = { Min = min, Max = max, Default = math.clamp(State[key], min, max) },
+            Callback = function(v)
                 if not uiReady then return end
                 State[key] = tonumber(v) or State[key]
             end,
         })
     end
 
-    -- Atualiza a lista de um dropdown de jogadores mantendo a seleção atual
-    -- (a Luna exige uma opção válida ao trocar a lista)
-    local function refreshPlayerDropdown(obj, guard, values, current, adopt)
-        if not obj then return end
-
-        local list = {}
-        for _, v in ipairs(values) do
-            list[#list + 1] = v
-        end
-        if current and not table.find(list, current) then
-            list[#list + 1] = current
-        end
-        if #list == 0 then
-            list[1] = L("none")
-        end
-
-        local chosen = (current and table.find(list, current)) and current or list[1]
-        guard.busy = true
-        pcall(function()
-            obj:Set({ Options = list, CurrentOption = { chosen } })
-        end)
-        guard.busy = false
-
-        if current == nil and chosen ~= L("none") then
-            adopt(chosen)
-        end
-    end
-
     -- ───────────── MAIN ─────────────
-    local InfoSec = TabMain:CreateSection(L("sec_info"))
-    InfoSec:CreateLabel({ Text = L("info_author"), Style = 1 })
-    InfoSec:CreateLabel({ Text = L("info_menu"), Style = 2 })
+    local InfoSec = newSection(TabMain, L("sec_info"))
+    InfoSec:Paragraph({ Title = L("info_author"), Desc = L("info_menu") })
 
     -- ───────────── PLAYER ─────────────
-    local MoveSec = TabPlayer:CreateSection(L("sec_move"))
+    local MoveSec = newSection(TabPlayer, L("sec_move"))
     addToggle(MoveSec, L("cframe"), "CFrameOn")
     addSlider(MoveSec, L("cframe_speed"), "CFrameSpeed", 5, 100)
     addToggle(MoveSec, L("inf_jump"), "InfJump")
     addToggle(MoveSec, L("noclip"), "Noclip")
 
-    local ProtectSec = TabPlayer:CreateSection(L("sec_protect"))
+    local ProtectSec = newSection(TabPlayer, L("sec_protect"))
     addToggle(ProtectSec, L("anti_fling"), "AntiFling", function(v)
         if not v then
             restoreBackup(antiBackup)
@@ -3110,34 +2619,32 @@ buildUI = function()
     end)
 
     -- ───────────── VISUALS (ESP) ─────────────
-    local NameSec = TabVisuals:CreateSection(L("sec_name"))
+    local NameSec = newSection(TabVisuals, L("sec_name"))
     addToggle(NameSec, L("esp_name"), "EspName")
 
-    local RolesSec = TabVisuals:CreateSection(L("sec_roles"))
+    local RolesSec = newSection(TabVisuals, L("sec_roles"))
     addToggle(RolesSec, L("role_inn"),  "RoleInnocent")
     addToggle(RolesSec, L("role_sher"), "RoleSheriff")
     addToggle(RolesSec, L("role_murd"), "RoleMurderer")
 
-    local ItemsSec = TabVisuals:CreateSection(L("sec_items"))
+    local ItemsSec = newSection(TabVisuals, L("sec_items"))
     addToggle(ItemsSec, L("gun_drop"),      "GunDrop")
     addToggle(ItemsSec, L("arrow_murder"),  "ArrowMurder")
     addToggle(ItemsSec, L("arrow_sheriff"), "ArrowSheriff")
 
     -- ───────────── WEAPON ─────────────
-    local PickSec = TabPick:CreateSection(L("sec_pick"))
+    local PickSec = newSection(TabPick, L("sec_pick"))
     addToggle(PickSec, L("pick_auto"), "PickAuto")
     addToggle(PickSec, L("pick_screen"), "PickButton", setPickButtonVisible)
 
-    local PickPcSec = TabPick:CreateSection(L("sec_pick_pc"))
+    local PickPcSec = newSection(TabPick, L("sec_pick_pc"))
     addToggle(PickPcSec, L("pick_key_on"), "PickKeyOn")
-    PickPcSec:CreateBind({
-        Name             = L("pick_key"),
-        CurrentBind      = State.PickKey.Name,
-        HoldToInteract   = false,
-        Callback         = function() end, -- quem pega a arma é o próprio script
-        OnChangedCallback = function(bind)
+    PickPcSec:Keybind({
+        Title    = L("pick_key"),
+        Value    = State.PickKey.Name,
+        Callback = function(v) -- quem pega a arma é o próprio script
             if not uiReady then return end
-            local kc = toKeyCode(bind)
+            local kc = toKeyCode(v)
             if kc then
                 State.PickKey = kc
             end
@@ -3146,14 +2653,14 @@ buildUI = function()
 
     -- ───────────── AUTO FARM ─────────────
     -- (o Auto Farm nunca liga sozinho na próxima execução)
-    local FarmSec = TabFarm:CreateSection(L("sec_farm"))
+    local FarmSec = newSection(TabFarm, L("sec_farm"))
     addToggle(FarmSec, L("farm_on"), "FarmOn")
     addSlider(FarmSec, L("farm_limit"), "FarmLimit", 10, 60)
     addToggle(FarmSec, L("farm_safe"), "FarmSafe")
     addToggle(FarmSec, L("farm_reset"), "FarmReset")
 
     -- ───────────── AIMBOT MM2 ─────────────
-    local MagicSec = TabSheriff:CreateSection(L("sec_magic"))
+    local MagicSec = newSection(TabSheriff, L("sec_magic"))
     addToggle(MagicSec, L("magic"), "MagicBullet", function(v)
         if v then
             if not installAimHook() then
@@ -3163,13 +2670,14 @@ buildUI = function()
             magicAim = nil
         end
     end)
-    MagicSec:CreateDropdown({
-        Name            = L("magic_part"),
-        Options         = { L("part_torso"), L("part_head") },
-        CurrentOption   = { (State.AimPart == "Head") and L("part_head") or L("part_torso") },
-        MultipleOptions = false,
-        Callback        = function(option)
+    MagicSec:Dropdown({
+        Title    = L("magic_part"),
+        Values   = { L("part_torso"), L("part_head") },
+        Value    = (State.AimPart == "Head") and L("part_head") or L("part_torso"),
+        Multi    = false,
+        Callback = function(option)
             if not uiReady then return end
+            if type(option) == "table" then option = option[1] end
             if option == L("part_head") then
                 State.AimPart = "Head"
             elseif option == L("part_torso") then
@@ -3179,7 +2687,7 @@ buildUI = function()
     })
     addToggle(MagicSec, L("magic_predict"), "AimPredict")
 
-    local WallSec = TabSheriff:CreateSection(L("sec_wall"))
+    local WallSec = newSection(TabSheriff, L("sec_wall"))
     addToggle(WallSec, L("wall_shot"), "WallShot", function(v)
         if v then
             if not installAimHook() then
@@ -3190,12 +2698,12 @@ buildUI = function()
         end
     end)
 
-    local AutoPickSec = TabSheriff:CreateSection(L("sec_autopick"))
+    local AutoPickSec = newSection(TabSheriff, L("sec_autopick"))
     addToggle(AutoPickSec, L("autopick_gun"), "AutoPickGun")
 
     -- ───────────── TROLL ─────────────
     -- 1) Fling (liga/desliga)   2) Escolher o player   3) Velocidade sempre no máximo
-    local FlingSec = TabTroll:CreateSection(L("sec_fling"))
+    local FlingSec = newSection(TabTroll, L("sec_fling"))
 
     local flingToggleObj = addToggle(FlingSec, L("fling"), "Fling", function(v)
         if v then
@@ -3221,129 +2729,72 @@ buildUI = function()
     FlingToggle = {
         Set = function(_, v)
             pcall(function()
-                flingToggleObj:Set({ CurrentValue = v and true or false })
+                flingToggleObj:Set(v and true or false)
             end)
         end,
     }
 
     local flingGuard = { busy = false }
     local flingNames = flingValues()
-    local flingObj = FlingSec:CreateDropdown({
-        Name            = L("fling_player"),
-        Options         = flingNames,
-        CurrentOption   = (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and { State.FlingTarget } or {},
-        MultipleOptions = false,
-        Callback        = function(option)
+    local flingStart = (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and State.FlingTarget or nil
+    local flingObj = FlingSec:Dropdown({
+        Title    = L("fling_player"),
+        Values   = flingNames,
+        Value    = flingStart,
+        Multi    = false,
+        Callback = function(option)
             if flingGuard.busy then return end
+            if type(option) == "table" then option = option[1] end
             if type(option) == "string" then
-                State.FlingTarget = (option ~= L("none")) and option or nil
+                State.FlingTarget = option
             end
         end,
     })
     FlingDropdown = {
+        -- troca a lista mantendo o jogador escolhido (mesmo que ele tenha saído)
         Refresh = function(_, values)
-            refreshPlayerDropdown(flingObj, flingGuard, values, State.FlingTarget, function(v)
-                State.FlingTarget = v
+            local keep = State.FlingTarget
+            local list = {}
+            for _, v in ipairs(values) do
+                list[#list + 1] = v
+            end
+            if keep and not table.find(list, keep) then
+                list[#list + 1] = keep
+            end
+
+            flingGuard.busy = true
+            pcall(function()
+                flingObj:Refresh(list)
             end)
+            if keep then
+                pcall(function()
+                    flingObj:Select(keep)
+                end)
+            end
+            flingGuard.busy = false
+            State.FlingTarget = keep
         end,
     }
-
-    -- ───────────── COPY ANIMATION ─────────────
-    local CopySec = TabEmotes:CreateSection(L("sec_copy"))
-
-    local emoteGuard = { busy = false }
-    local emoteNames = flingList()
-    local emoteObj = CopySec:CreateDropdown({
-        Name            = L("copy_player"),
-        Options         = emoteNames,
-        CurrentOption   = (EmoteTarget and table.find(emoteNames, EmoteTarget)) and { EmoteTarget } or {},
-        MultipleOptions = false,
-        Callback        = function(option)
-            if emoteGuard.busy then return end
-            if type(option) == "string" then
-                EmoteTarget = (option ~= L("none")) and option or nil
-            end
-        end,
-    })
-    EmoteDropdown = {
-        Refresh = function(_, values)
-            refreshPlayerDropdown(emoteObj, emoteGuard, values, EmoteTarget, function(v)
-                EmoteTarget = v
-            end)
-        end,
-    }
-
-    CopySec:CreateButton({
-        Name     = L("copy_refresh"),
-        Callback = function()
-            refreshEmoteList()
-        end,
-    })
-    CopySec:CreateButton({
-        Name     = L("copy_btn"),
-        Callback = function()
-            local ok, reason = copyAnimationFrom(EmoteTarget)
-            if ok then
-                notify(L(reason == "saved" and "copy_saved" or "copy_ok"), "check", 2.5)
-            else
-                local key = (reason == "dead" and "copy_dead")
-                    or (reason == "noanim" and "copy_noanim")
-                    or "copy_noplayer"
-                notify(L(key), "triangle-alert", 3)
-            end
-        end,
-    })
-    CopySec:CreateButton({
-        Name     = L("copy_restore"),
-        Callback = function()
-            if restoreAnimation() then
-                notify(L("copy_restored"), "check", 2.5)
-            end
-        end,
-    })
-
-    local SavedSec = TabEmotes:CreateSection(L("sec_saved"))
-    SavedSec:CreateButton({
-        Name     = L("saved_use"),
-        Callback = function()
-            if not savedAnim then
-                notify(L("saved_none"), "triangle-alert", 3)
-            elseif applyAnimIds(savedAnim) then
-                copiedAnim = savedAnim
-                notify(L("saved_used"), "check", 2.5)
-            else
-                notify(L("copy_dead"), "triangle-alert", 3)
-            end
-        end,
-    })
-    SavedSec:CreateButton({
-        Name     = L("saved_remove"),
-        Callback = function()
-            removeAnimFile()
-            notify(L("saved_removed"), "check", 2.5)
-        end,
-    })
 
     -- ───────────── SETTINGS ─────────────
-    local MenuSec = TabSettings:CreateSection(L("sec_menu"))
-    MenuSec:CreateBind({
-        Name             = L("menu_key"),
-        CurrentBind      = State.MenuKey.Name,
-        HoldToInteract   = false,
-        Callback         = function() end,
-        OnChangedCallback = function(bind)
+    local MenuSec = newSection(TabSettings, L("sec_menu"))
+    MenuSec:Keybind({
+        Title    = L("menu_key"),
+        Value    = State.MenuKey.Name,
+        Callback = function(v)
             if not uiReady then return end
-            local kc = toKeyCode(bind)
+            local kc = toKeyCode(v)
             if kc then
                 State.MenuKey = kc
+                pcall(function()
+                    Window:SetToggleKey(kc)
+                end)
             end
         end,
     })
 
-    addToggle(MenuSec, L("float_lock"), "BukBtnLock")
-
-    MenuSec:CreateButton({
-        Name     = L("save_btn"),
+    MenuSec:Button({
+        Title    = L("save_btn"),
         Callback = function()
             if not Compat.files then
                 notify(L("no_files"), "triangle-alert", 3)
@@ -3359,8 +2810,8 @@ buildUI = function()
 
     -- Unload: toque duas vezes (evita fechar sem querer)
     local unloadArmed = false
-    MenuSec:CreateButton({
-        Name     = L("unload_btn"),
+    MenuSec:Button({
+        Title    = L("unload_btn"),
         Callback = function()
             if unloadArmed then
                 Unload()
@@ -3374,14 +2825,9 @@ buildUI = function()
         end,
     })
 
-    -- Botão flutuante BUK + ocultar a interface sem deixar sobras
-    LunaGui = findLunaGui()
-    if LunaGui then
-        hookLunaControls()
-    else
-        safeWarn("could not find the Luna window to hide it", "hide")
-    end
-    buildBukButton()
+    pcall(function()
+        TabMain:Select()
+    end)
 
     uiReady = true
 end
@@ -3411,7 +2857,6 @@ Unload = function()
         removePlayer(player)
     end
 
-    task.spawn(function() pcall(restoreAnimation) end)
     pcall(function() ArrowGui:Destroy() end)
     pcall(function() PickGui:Destroy() end)
     pcall(function() HighlightFolder:Destroy() end)
