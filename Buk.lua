@@ -7,7 +7,7 @@
 
     Abas: Main | Player | ESP | Weapon | Auto Farm | Aimbot MM2 | Troll | Copy Animation | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
-    Celular: fechar a janela (X) deixa um botão flutuante para abrir de novo
+    Celular: botão flutuante "BUK" abre/fecha o menu (arraste para mudar de lugar)
 ]]
 
 -- ═══════════════════════════════════════════════════════════
@@ -163,7 +163,8 @@ local STR = {
         save_fail_text = "Couldn't save the settings.",
         no_files = "Your executor can't save files (writefile).",
         sec_info = "Info", info_author = "Developed by: Linesketon02",
-        info_menu = "Tap X to hide the menu. On mobile a floating button appears to open it again. On PC use the Menu Key (Settings > Menu Key).",
+        info_menu = "Tap the BUK floating button to hide or show the menu (drag it to move). The X button hides the menu too. On PC you can also use the Menu Key (Settings > Menu Key).",
+        float_lock = "Lock BUK Button Position",
         close_confirm = "Tap again to unload the script.",
         none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
     },
@@ -225,7 +226,10 @@ local State = {
     Fling = false,
 
     -- Menu
-    MenuKey = Enum.KeyCode.RightShift,
+    MenuKey    = Enum.KeyCode.RightShift,
+    BukBtnX    = 0.93,  -- posição do botão flutuante BUK (fração da largura da tela)
+    BukBtnY    = 0.30,  -- posição do botão flutuante BUK (fração da altura da tela)
+    BukBtnLock = false, -- trava o botão BUK (não deixa arrastar)
 }
 
 -- true enquanto o Fling está rodando (pausa Noclip, Anti-Fling, CFrame e Auto Farm)
@@ -371,6 +375,7 @@ local SAVE_KEYS = {
     "CFrameOn", "CFrameSpeed", "InfJump", "Noclip", "AntiFling",
     "MagicBullet", "WallShot", "AimPart", "AimPredict", "AutoPickGun",
     "FarmSafe", "FarmLimit", "FarmReset",
+    "BukBtnX", "BukBtnY", "BukBtnLock",
 }
 
 local function saveConfig()
@@ -2664,9 +2669,294 @@ local NOTIFY_ICONS = {
     ["save"]           = "save",
 }
 
+
+-- ───────────── OCULTAR/MOSTRAR A INTERFACE + BOTÃO FLUTUANTE "BUK" ─────────────
+-- A Luna, quando oculta a janela, deixa peças soltas na tela (barra de arrastar,
+-- sombra, blur) que continuam pegando toque: era o "negócio invisível".
+-- Aqui o script esconde TUDO da Luna por conta própria (menos os avisos) e o
+-- botão BUK abre/fecha o menu. O X da janela e a tecla do menu usam o mesmo caminho.
+local INERT_KEY = Enum.KeyCode.World95 -- tecla que ninguém aperta (desliga o atalho interno da Luna)
+local BUK_W, BUK_H = 64, 38
+local BUK_DRAG_MIN = 10
+
+local LunaGui    = nil  -- ScreenGui da Luna
+local BukGui     = nil  -- ScreenGui do botão BUK
+local BukBtn     = nil
+local BukStroke  = nil
+local menuOpen   = true
+local hiddenGui  = {}   -- [peça da Luna] = Visible de antes de ocultar
+local hiddenBlur = {}   -- pastas "LunaBlur" da câmera retiradas enquanto o menu está oculto
+local menuConns  = {}
+
+local function findLunaGui()
+    local roots = {}
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and typeof(h) == "Instance" then
+            roots[#roots + 1] = h
+        end
+    end
+    local okCore, core = pcall(function()
+        return game:GetService("CoreGui")
+    end)
+    if okCore and core then
+        roots[#roots + 1] = core
+        local rg = core:FindFirstChild("RobloxGui")
+        if rg then
+            roots[#roots + 1] = rg
+        end
+    end
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        roots[#roots + 1] = pg
+    end
+
+    local fallback = nil
+    for _, root in ipairs(roots) do
+        local okList, kids = pcall(function()
+            return root:GetChildren()
+        end)
+        if okList then
+            for _, g in ipairs(kids) do
+                if g:IsA("ScreenGui") and g.Name ~= "Luna-Old" and g:FindFirstChild("SmartWindow") then
+                    local okT, title = pcall(function()
+                        return g.SmartWindow.Title.Title.Text
+                    end)
+                    if okT and title == "Buk" then
+                        return g
+                    end
+                    fallback = fallback or g
+                end
+            end
+        end
+    end
+    return fallback
+end
+
+local function setLunaShown(show)
+    local gui = LunaGui
+    if not gui or not gui.Parent then return end
+
+    if show then
+        for obj, was in pairs(hiddenGui) do
+            if obj.Parent then
+                pcall(function()
+                    obj.Visible = was
+                end)
+            end
+        end
+        table.clear(hiddenGui)
+
+        local cam = Workspace.CurrentCamera
+        for folder in pairs(hiddenBlur) do
+            if cam then
+                pcall(function()
+                    folder.Parent = cam
+                end)
+            end
+        end
+        table.clear(hiddenBlur)
+    else
+        for _, child in ipairs(gui:GetChildren()) do
+            if child:IsA("GuiObject") and child.Name ~= "Notifications" and hiddenGui[child] == nil then
+                hiddenGui[child] = child.Visible
+                child.Visible = false
+            end
+        end
+
+        -- vidro/blur que a Luna desenha na câmera
+        local cam = Workspace.CurrentCamera
+        if cam then
+            for _, f in ipairs(cam:GetChildren()) do
+                if f.Name == "LunaBlur" then
+                    hiddenBlur[f] = true
+                    pcall(function()
+                        f.Parent = nil
+                    end)
+                end
+            end
+        end
+    end
+end
+
+local function refreshBukButton()
+    if not BukBtn then return end
+    pcall(function()
+        BukStroke.Color = menuOpen and ACCENT or NAME_NEUTRAL
+        BukBtn.TextColor3 = menuOpen and WHITE or Color3.fromRGB(200, 205, 225)
+    end)
+end
+
+local function setMenuOpen(open)
+    menuOpen = open and true or false
+    setLunaShown(menuOpen)
+    refreshBukButton()
+end
+
+local function buildBukButton()
+    local cam = Workspace.CurrentCamera
+    local vp  = cam and cam.ViewportSize or Vector2.new(1280, 720)
+
+    BukGui = newScreenGui("BukFloatGui", 2000000000)
+
+    BukBtn = Instance.new("TextButton")
+    BukBtn.Name = "BukFloatButton"
+    BukBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+    BukBtn.Position = UDim2.fromOffset(
+        math.clamp(State.BukBtnX * vp.X, BUK_W / 2, vp.X - BUK_W / 2),
+        math.clamp(State.BukBtnY * vp.Y, BUK_H / 2, vp.Y - BUK_H / 2)
+    )
+    BukBtn.Size = UDim2.fromOffset(BUK_W, BUK_H)
+    BukBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    BukBtn.BackgroundTransparency = 0.1
+    BukBtn.AutoButtonColor = false
+    BukBtn.Font = Enum.Font.GothamBold
+    BukBtn.TextSize = 16
+    BukBtn.TextColor3 = WHITE
+    BukBtn.Text = "BUK"
+    BukBtn.Parent = BukGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = BukBtn
+
+    BukStroke = Instance.new("UIStroke")
+    BukStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    BukStroke.Color = ACCENT
+    BukStroke.Thickness = 2
+    BukStroke.Transparency = 0.1
+    BukStroke.Parent = BukBtn
+
+    -- Arrastar move o botão (sem sair da tela); tocar sem arrastar abre/fecha o menu
+    local dragging, moved = false, false
+    local dragInput, dragStart, startCenter = nil, nil, nil
+
+    menuConns[#menuConns + 1] = BukBtn.InputBegan:Connect(function(input)
+        local t = input.UserInputType
+        if t ~= Enum.UserInputType.Touch and t ~= Enum.UserInputType.MouseButton1 then
+            return
+        end
+
+        dragging    = true
+        moved       = false
+        dragInput   = input
+        dragStart   = input.Position
+        startCenter = Vector2.new(BukBtn.Position.X.Offset, BukBtn.Position.Y.Offset)
+
+        local conn
+        conn = input.Changed:Connect(function()
+            if input.UserInputState ~= Enum.UserInputState.End then return end
+            conn:Disconnect()
+            dragging = false
+
+            if moved then
+                local c2 = Workspace.CurrentCamera
+                local v2 = c2 and c2.ViewportSize or Vector2.new(1280, 720)
+                State.BukBtnX = BukBtn.Position.X.Offset / math.max(v2.X, 1)
+                State.BukBtnY = BukBtn.Position.Y.Offset / math.max(v2.Y, 1)
+            else
+                setMenuOpen(not menuOpen)
+            end
+        end)
+    end)
+
+    menuConns[#menuConns + 1] = UserInputService.InputChanged:Connect(function(input)
+        if not dragging or not dragInput or State.BukBtnLock then return end
+
+        if dragInput.UserInputType == Enum.UserInputType.Touch then
+            if input ~= dragInput then return end
+        elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then
+            return
+        end
+
+        local delta = input.Position - dragStart
+        if delta.Magnitude > BUK_DRAG_MIN then
+            moved = true
+        end
+        if moved then
+            local c2   = Workspace.CurrentCamera
+            local v2   = c2 and c2.ViewportSize or Vector2.new(1280, 720)
+            local half = Vector2.new(BUK_W, BUK_H) / 2
+            local nx = math.clamp(startCenter.X + delta.X, half.X, v2.X - half.X)
+            local ny = math.clamp(startCenter.Y + delta.Y, half.Y, v2.Y - half.Y)
+            BukBtn.Position = UDim2.fromOffset(nx, ny)
+        end
+    end)
+
+    refreshBukButton()
+end
+
+local function hookLunaControls()
+    local gui = LunaGui
+    if not gui then return end
+
+    -- X da janela: usa o ocultar do script (o da Luna deixa peças soltas na tela)
+    pcall(function()
+        local close = gui.SmartWindow.Controls.Close
+        local shield = Instance.new("TextButton")
+        shield.Name = "BukCloseShield"
+        shield.BackgroundTransparency = 1
+        shield.Size = UDim2.fromScale(1, 1)
+        shield.Text = ""
+        shield.AutoButtonColor = false
+        shield.ZIndex = 1000
+        shield.Parent = close
+        menuConns[#menuConns + 1] = shield.Activated:Connect(function()
+            setMenuOpen(false)
+        end)
+    end)
+
+    -- o botão de celular da própria Luna fica sempre escondido (quem abre é o BUK)
+    pcall(function()
+        local ms = gui:FindFirstChild("MobileSupport")
+        if ms then
+            ms.Visible = false
+            menuConns[#menuConns + 1] = ms:GetPropertyChangedSignal("Visible"):Connect(function()
+                if ms.Visible then
+                    ms.Visible = false
+                end
+            end)
+        end
+    end)
+
+    -- Tecla do menu (PC)
+    menuConns[#menuConns + 1] = UserInputService.InputBegan:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == State.MenuKey then
+            setMenuOpen(not menuOpen)
+        end
+    end)
+end
+
 destroyUI = function()
     NotifyImpl = nil
     FlingDropdown, FlingToggle, EmoteDropdown = nil, nil, nil
+
+    for _, c in ipairs(menuConns) do
+        pcall(function()
+            c:Disconnect()
+        end)
+    end
+    table.clear(menuConns)
+
+    for f in pairs(hiddenBlur) do
+        pcall(function()
+            f:Destroy()
+        end)
+    end
+    table.clear(hiddenBlur)
+    table.clear(hiddenGui)
+
+    pcall(function()
+        if BukGui then
+            BukGui:Destroy()
+        end
+    end)
+    BukGui, BukBtn, BukStroke = nil, nil, nil
+    menuOpen = true
+
+    local gui = LunaGui
+    LunaGui = nil
 
     local lib = LunaLib
     LunaLib = nil
@@ -2675,6 +2965,11 @@ destroyUI = function()
             lib:Destroy()
         end)
     end
+    pcall(function()
+        if gui then
+            gui:Destroy()
+        end
+    end)
 end
 
 buildUI = function()
@@ -2720,7 +3015,7 @@ buildUI = function()
         KeySystem      = false,
         ConfigSettings = { ConfigFolder = "Buk" },
     })
-    Window.Bind = State.MenuKey
+    Window.Bind = INERT_KEY -- o atalho de teclado agora é do script (ocultar sem sobras na tela)
 
     local function newTab(titleKey, icon)
         return Window:CreateTab({
@@ -3041,10 +3336,11 @@ buildUI = function()
             local kc = toKeyCode(bind)
             if kc then
                 State.MenuKey = kc
-                Window.Bind   = kc
             end
         end,
     })
+
+    addToggle(MenuSec, L("float_lock"), "BukBtnLock")
 
     MenuSec:CreateButton({
         Name     = L("save_btn"),
@@ -3077,6 +3373,15 @@ buildUI = function()
             end)
         end,
     })
+
+    -- Botão flutuante BUK + ocultar a interface sem deixar sobras
+    LunaGui = findLunaGui()
+    if LunaGui then
+        hookLunaControls()
+    else
+        safeWarn("could not find the Luna window to hide it", "hide")
+    end
+    buildBukButton()
 
     uiReady = true
 end
