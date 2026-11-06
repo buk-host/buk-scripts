@@ -5,7 +5,7 @@
     ║  UI: WindUI                          ║
     ╚══════════════════════════════════════╝
 
-    Abas: Main | Player | Auto Farm | ESP | Weapon | Aimbot MM2 | Troll | Settings
+    Abas: Main | Player | Auto Farm | ESP | Weapon | Aimbot MM2 | Troll | News | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
     Celular: minimize a janela e use o botão "BUK" (arrastável) para abrir de novo
 ]]
@@ -31,6 +31,7 @@ local Workspace         = game:GetService("Workspace")
 local UserInputService  = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService      = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 local HttpService       = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -117,7 +118,7 @@ local Lang = "en"
 local STR = {
     en = {
         tab_main = "Main", tab_player = "Player", tab_visuals = "ESP", tab_pick = "Weapon", tab_farm = "Auto Farm",
-        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_settings = "Settings",
+        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_settings = "Settings", tab_news = "News",
         sec_move = "Movement", sec_protect = "Protection",
         cframe = "CFrame", cframe_speed = "CFrame Speed", inf_jump = "Infinite Jump",
         noclip = "Noclip", anti_fling = "Anti-Fling",
@@ -134,12 +135,20 @@ local STR = {
         sec_magic = "Magic Bullet", magic = "Magic Bullet",
         magic_part = "Aim Part", part_torso = "Torso", part_head = "Head",
         magic_predict = "Prediction (ping compensation)",
-        sec_autopick = "Auto Pick", autopick_gun = "Auto Pick Dropped Gun",
+        wall_shot = "Shoot Through Walls",
         sec_fling = "Fling", fling = "Fling", fling_player = "Select Player",
         fling_notarget = "Select a player first.", fling_dead = "You need to be alive.",
         fling_norole = "No Sheriff/Murderer in the match right now.",
         fling_tdead = "That player isn't alive right now.", fling_left = "The player left. Fling stopped.",
         sec_menu = "Menu",
+        sec_look = "Appearance", theme = "Theme", transparent = "Transparent Window", notifs = "Notifications",
+        sec_config = "Settings File", autosave = "Auto Save", delete_btn = "Delete Saved Settings",
+        deleted_text = "Saved settings deleted. Defaults load next time.",
+        sec_util = "Utilities", anti_afk = "Anti-AFK", fps_boost = "FPS Boost",
+        sec_server = "Server", rejoin = "Rejoin Server", hop = "Server Hop", copy_id = "Copy Server ID",
+        rejoining = "Rejoining...", hop_search = "Looking for another server...",
+        hop_none = "No other server found.", hop_fail = "Couldn't get the server list.",
+        copied = "Server ID copied.", no_clip = "Your executor can't copy to the clipboard.",
         menu_key = "Menu Key", save_btn = "Save Settings", unload_btn = "Unload Script",
         loaded = "Loaded successfully! by Linesketon02",
         pick_ok = "Gun picked up!", pick_auto_ok = "Gun picked up automatically!",
@@ -152,8 +161,6 @@ local STR = {
         saved_text = "Settings saved successfully.",
         save_fail_text = "Couldn't save the settings.",
         no_files = "Your executor can't save files (writefile).",
-        sec_info = "Info", info_author = "Developed by: Linesketon02",
-        info_menu = "Minimize the window to hide the menu and tap the BUK button to open it again (you can drag the button). On PC you can also use the Menu Key (Settings > Menu Key).",
         close_confirm = "Tap again to unload the script.",
         none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
     },
@@ -199,9 +206,9 @@ local State = {
 
     -- Sheriff
     MagicBullet = false,
+    WallShot    = false,
     AimPart     = "Torso",
     AimPredict  = true,
-    AutoPickGun = false,
 
     -- Auto Farm
     FarmOn    = false,
@@ -216,6 +223,12 @@ local State = {
 
     -- Menu
     MenuKey = Enum.KeyCode.RightShift,
+    Notify      = true,   -- avisos na tela
+    AutoSave    = false,  -- salva as opções sozinho
+    AntiAFK     = false,
+    FpsBoost    = false,
+    Theme       = "Dark", -- tema da WindUI
+    Transparent = true,   -- janela transparente
 }
 
 -- true enquanto o Fling está rodando (pausa Noclip, Anti-Fling, CFrame e Auto Farm)
@@ -271,7 +284,7 @@ local function loop(tag, interval, fn)
 end
 
 local function notify(text, icon, duration)
-    if not NotifyImpl then return end
+    if not NotifyImpl or State.Notify == false then return end
     pcall(NotifyImpl, text, icon, duration)
 end
 
@@ -359,8 +372,9 @@ local SAVE_KEYS = {
     "RoleInnocent", "RoleSheriff", "RoleMurderer", "EspName", "GunDrop", "ArrowMurder", "ArrowSheriff",
     "PickAuto", "PickButton", "PickKeyOn",
     "CFrameOn", "CFrameSpeed", "InfJump", "Noclip", "AntiFling",
-    "MagicBullet", "AimPart", "AimPredict", "AutoPickGun",
+    "MagicBullet", "WallShot", "AimPart", "AimPredict",
     "FarmSafe", "FarmLimit", "FarmReset", "FarmUnder",
+    "Notify", "AutoSave", "AntiAFK", "FpsBoost", "Theme", "Transparent",
 }
 
 local function saveConfig()
@@ -497,7 +511,7 @@ end
 local function roleDataNeeded()
     return rolesNeeded()
         or State.ArrowMurder or State.ArrowSheriff
-        or State.MagicBullet or State.AutoPickGun
+        or State.MagicBullet or State.WallShot
         or State.FarmOn
         or (State.Fling and type(State.FlingTarget) == "string" and State.FlingTarget:sub(1, 1) == "[")
 end
@@ -1252,7 +1266,8 @@ local FARM_DEPTH = 9 -- Underground: quantos studs abaixo da moeda você anda
 
 local Farm = {
     container = nil,   -- pasta das moedas do mapa atual
-    visited   = {},    -- moedas já pegas ou descartadas
+    visited   = {},    -- moedas já tocadas ou descartadas (não são alvo de novo)
+    pending   = {},    -- moedas tocadas que ainda não sumiram (o servidor pode demorar)
     tries     = setmetatable({}, { __mode = "k" }),
     count     = 0,     -- moedas pegas nesta partida
     fullFor   = nil,   -- mapa em que a bolsa já encheu
@@ -1335,10 +1350,25 @@ function Farm.findContainer()
     return Workspace:FindFirstChild("CoinContainer", true)
 end
 
+-- A moeda já foi coletada? (sumiu, perdeu o CoinVisual ou ele ficou invisível)
+function Farm.isCollected(coin)
+    if not coin.Parent then
+        return true
+    end
+    local v = coin:FindFirstChild("CoinVisual")
+    if not v then
+        return true
+    end
+    if v:IsA("BasePart") and v.Transparency >= 0.95 then
+        return true
+    end
+    return false
+end
+
 function Farm.coinAvailable(coin)
     return coin:IsA("BasePart")
-        and coin:FindFirstChild("CoinVisual") ~= nil
         and not Farm.visited[coin]
+        and not Farm.isCollected(coin)
 end
 
 function Farm.pickCoin(container, from)
@@ -1445,11 +1475,20 @@ end
 -- Espera a moeda sumir (foi coletada). Retorna true se coletou.
 function Farm.waitCollected(coin)
     local t0 = os.clock()
-    while alive and State.FarmOn and coin.Parent
-        and coin:FindFirstChild("CoinVisual") and os.clock() - t0 < 0.4 do
+    while alive and State.FarmOn and not Farm.isCollected(coin) and os.clock() - t0 < 0.4 do
         task.wait()
     end
-    return coin.Parent == nil or coin:FindFirstChild("CoinVisual") == nil
+    return Farm.isCollected(coin)
+end
+
+-- Moedas que o servidor confirmou depois (sumiram com atraso) entram na contagem
+function Farm.sweepPending()
+    for coin in pairs(Farm.pending) do
+        if Farm.isCollected(coin) then
+            Farm.pending[coin] = nil
+            Farm.count = Farm.count + 1
+        end
+    end
 end
 
 -- Mantém o personagem travado na posição enquanto o Auto Farm está no controle
@@ -1515,6 +1554,7 @@ loop("farm", 0.03, function()
         Farm.release()
         Farm.container = container
         Farm.visited   = {}
+        Farm.pending   = {}
         Farm.tries     = setmetatable({}, { __mode = "k" })
         Farm.count     = 0
         Farm.fullFor   = nil
@@ -1529,6 +1569,8 @@ loop("farm", 0.03, function()
     if Farm.engaged and Farm.rootRef ~= root then
         Farm.engaged, Farm.under, Farm.pos, Farm.rootRef = false, false, nil, nil
     end
+
+    Farm.sweepPending()
 
     -- Bolsa cheia: sobe de volta, para até a próxima rodada (e reseta se pedido)
     if Farm.count >= State.FarmLimit then
@@ -1559,16 +1601,22 @@ loop("farm", 0.03, function()
 
     local coin = Farm.pickCoin(container, from)
     if not coin then
-        -- sem moeda livre: sobe depois de 1s e, depois de 3s, libera as já visitadas que ainda existem
+        -- sem moeda livre: sobe depois de 1s e, depois de 3s, tenta de novo as que não confirmaram
         Farm.idleAt = Farm.idleAt or os.clock()
         local idle = os.clock() - Farm.idleAt
         if idle > 1 and Farm.engaged then
             Farm.release()
         end
         if idle > 3 then
-            Farm.idleAt  = nil
-            Farm.visited = {}
-            Farm.tries   = setmetatable({}, { __mode = "k" })
+            Farm.idleAt = nil
+            -- só libera de novo (1 tentativa extra) as moedas tocadas que não confirmaram;
+            -- as que já foram coletadas NUNCA voltam a ser alvo
+            for c in pairs(Farm.pending) do
+                if (Farm.tries[c] or 0) < 2 then
+                    Farm.visited[c] = nil
+                    Farm.pending[c] = nil
+                end
+            end
         end
         return
     end
@@ -1620,15 +1668,14 @@ loop("farm", 0.03, function()
             end)
         end
 
+        -- a moeda já conta como visitada: não volta nela agora (mesmo se o servidor demorar pra confirmar)
+        Farm.visited[coin] = true
         if Farm.waitCollected(coin) then
             Farm.count = Farm.count + 1
-            Farm.visited[coin] = true
         else
-            -- não coletou: tenta de novo (até 3 vezes) em vez de ignorar a moeda pra sempre
-            Farm.tries[coin] = (Farm.tries[coin] or 0) + 1
-            if Farm.tries[coin] >= 3 then
-                Farm.visited[coin] = true
-            end
+            -- sem confirmação ainda: fica pendente (conta quando sumir)
+            Farm.tries[coin]   = (Farm.tries[coin] or 0) + 1
+            Farm.pending[coin] = true
         end
 
         -- já desce de volta pra baixo do mapa
@@ -2068,9 +2115,9 @@ local function startFling()
 end
 
 -- ═══════════════════════════════════════════════════════════
---  13. AIMBOT MM2: Magic Bullet e Auto Pick
+--  13. AIMBOT MM2: Magic Bullet e Shoot Through Walls
 --  - Magic Bullet: a bala do SEU tiro vai direto pro murder (posição lida na hora do tiro)
---  - Auto Pick Dropped Gun: só pega a arma dropada (não atira sozinho)
+--  - Shoot Through Walls: parede não bloqueia o tiro (raycast da Gun + tag WeaponPassthrough)
 -- ═══════════════════════════════════════════════════════════
 local magicAim  = nil
 local forcedAim = nil
@@ -2126,6 +2173,8 @@ local Aim = {
     gun      = nil,   -- a Tool "Gun"
     equipped = false, -- Gun na mão
     ping     = 0.1,   -- ping em segundos (compensação do tiro)
+    tagged   = {},    -- peças que EU marquei como atravessáveis (Shoot Through Walls)
+    taggedN  = 0,
 }
 
 -- Ping atual em segundos
@@ -2170,6 +2219,49 @@ function Aim.point()
     return pos
 end
 
+-- Shoot Through Walls (parte 1): remove as marcas que EU coloquei
+function Aim.clearTags()
+    for part in pairs(Aim.tagged) do
+        pcall(function()
+            CollectionService:RemoveTag(part, "WeaponPassthrough")
+        end)
+        Aim.tagged[part] = nil
+    end
+    Aim.taggedN = 0
+end
+
+-- Shoot Through Walls (parte 2): tudo que estiver entre você e o murder
+-- recebe a tag "WeaponPassthrough" (a mesma que o jogo usa pras peças que a bala atravessa)
+function Aim.markWalls(fromPos, toPos, mChar)
+    if Aim.taggedN > 250 then
+        Aim.clearTags()
+    end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.IgnoreWater = true
+
+    local ex  = { LocalPlayer.Character, mChar }
+    local dir = toPos - fromPos
+
+    for _ = 1, 12 do
+        params.FilterDescendantsInstances = ex
+        local hit = Workspace:Raycast(fromPos, dir, params)
+        if not hit then break end
+
+        local part = hit.Instance
+        if not part then break end
+        ex[#ex + 1] = part
+
+        if part:IsA("BasePart") and not part:IsA("Terrain")
+            and not CollectionService:HasTag(part, "WeaponPassthrough") then
+            CollectionService:AddTag(part, "WeaponPassthrough")
+            Aim.tagged[part] = true
+            Aim.taggedN = Aim.taggedN + 1
+        end
+    end
+end
+
 -- Em qual argumento do remote vai a posição do tiro?
 function Aim.findSlot(args, count)
     local a2 = typeof(args[2])
@@ -2194,6 +2286,29 @@ function Aim.isShootRemote(inst)
     local parent = inst.Parent
     return inst.Name:lower():find("shoot", 1, true) ~= nil
         or (parent ~= nil and parent.Name == "CreateBeam")
+end
+
+-- O raycast veio do script da Gun (e não de outro script do jogo)?
+function Aim.callerIsGun()
+    if not getcallingscript then
+        return true
+    end
+    local ok, scr = pcall(getcallingscript)
+    if not ok or typeof(scr) ~= "Instance" then
+        return true
+    end
+
+    local node, depth = scr, 0
+    while node and depth < 12 do
+        if node == Aim.gun then
+            return true
+        end
+        node  = node.Parent
+        depth = depth + 1
+    end
+
+    local n = scr.Name:lower()
+    return n:find("knife", 1, true) ~= nil or n:find("gun", 1, true) ~= nil
 end
 
 -- Hook do tiro (precisa de executor com hookmetamethod ou getrawmetatable)
@@ -2231,6 +2346,34 @@ local function aimHandler(self, ...)
                     end
                     return oldNamecall(self, unpack(args, 1, count))
                 end
+            end
+
+        -- 2) SHOOT THROUGH WALLS: o raycast da Gun só enxerga o murder (parede não bloqueia)
+        elseif State.WallShot and Aim.equipped
+            and method == "Raycast" and self == Workspace then
+
+            local origin, direction = ...
+            if typeof(origin) == "Vector3" and typeof(direction) == "Vector3"
+                and Aim.char and Aim.char.Parent and Aim.callerIsGun() then
+
+                -- com Magic Bullet ligado, o raio também aponta direto pro murder
+                local aim = State.MagicBullet and Aim.point()
+                if aim then
+                    local to = aim - origin
+                    if to.Magnitude > 0.1 then
+                        direction = to.Unit * math.max(direction.Magnitude, to.Magnitude + 5)
+                    end
+                end
+
+                local params = RaycastParams.new()
+                params.FilterType = Enum.RaycastFilterType.Include
+                params.FilterDescendantsInstances = { Aim.char }
+                params.IgnoreWater = true
+
+                if setnamecallmethod then
+                    setnamecallmethod(method)
+                end
+                return oldNamecall(self, origin, direction, params)
             end
         end
     end
@@ -2280,18 +2423,21 @@ end
 
 -- Escolhe o alvo (~20x por segundo) e mantém o ponto de mira sempre atualizado
 do
-    local scanAt, pingAt = 0, 0
+    local scanAt, pingAt, wallAt = 0, 0, 0
     State.MagicStatus = "off"
 
     local function clearTarget()
         Aim.active, Aim.equipped = false, false
         Aim.char, Aim.root, Aim.head, Aim.gun = nil, nil, nil, nil
         magicAim = nil
+        if Aim.taggedN > 0 then
+            Aim.clearTags()
+        end
     end
 
     track(RunService.Heartbeat:Connect(function()
-        if not State.MagicBullet then
-            if Aim.active then
+        if not (State.MagicBullet or State.WallShot) then
+            if Aim.active or Aim.taggedN > 0 then
                 clearTarget()
             end
             State.MagicStatus = "off"
@@ -2352,6 +2498,12 @@ do
                 Aim.gun, Aim.equipped = gun, equipped
                 Aim.active = true
                 State.MagicStatus = "ready"
+
+                -- Shoot Through Walls: marca o que está entre você e o murder
+                if State.WallShot and now - wallAt >= 0.12 then
+                    wallAt = now
+                    Aim.markWalls(root.Position, mRoot.Position, mChar)
+                end
             end)
 
             if not ok then
@@ -2362,33 +2514,6 @@ do
 
         magicAim = Aim.active and Aim.point() or nil
     end))
-end
-
--- Auto Pick Dropped Gun (só pega a arma dropada, não atira)
-do
-    local tries = setmetatable({}, { __mode = "k" })
-
-    loop("autopickgun", 0.1, function()
-        if not State.AutoPickGun then return end
-
-        local char = LocalPlayer.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not (hum and root and hum.Health > 0) then return end
-        if getRole(LocalPlayer) == "Murderer" then return end
-        if pickBusy or hasTool(LocalPlayer, "Gun") then return end
-
-        local drop = findGunDrop(false)
-        if drop and (tries[drop] or 0) < 4 then
-            local ok, reason = pickGun(false)
-            if ok then
-                notify(L("pick_auto_ok"), "check")
-            elseif reason == "fail" then
-                tries[drop] = (tries[drop] or 0) + 1
-                task.wait(1)
-            end
-        end
-    end)
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -2546,6 +2671,137 @@ do
 end
 
 -- ═══════════════════════════════════════════════════════════
+--  14B. EXTRAS DA ABA SETTINGS
+--  Anti-AFK, FPS Boost, Rejoin, Server Hop, Copiar ID do servidor e Auto Save
+-- ═══════════════════════════════════════════════════════════
+local Util = {
+    afkConn   = nil, -- conexão do Anti-AFK
+    fpsBackup = nil, -- valores originais (FPS Boost)
+}
+
+-- Anti-AFK: o Roblox não te desconecta por ficar parado
+function Util.setAntiAfk(on)
+    if Util.afkConn then
+        pcall(function() Util.afkConn:Disconnect() end)
+        Util.afkConn = nil
+    end
+    if on then
+        Util.afkConn = LocalPlayer.Idled:Connect(function()
+            pcall(function()
+                local vu = game:GetService("VirtualUser")
+                vu:CaptureController()
+                vu:ClickButton2(Vector2.new())
+            end)
+        end)
+    end
+end
+
+-- FPS Boost: sombras e qualidade gráfica no mínimo (desligar devolve o original)
+function Util.setFpsBoost(on)
+    local Lighting = game:GetService("Lighting")
+    if on then
+        if Util.fpsBackup then return end
+        local backup = {}
+        Util.fpsBackup = backup
+        pcall(function()
+            backup.shadows = Lighting.GlobalShadows
+            Lighting.GlobalShadows = false
+        end)
+        pcall(function()
+            backup.quality = settings().Rendering.QualityLevel
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        end)
+    else
+        local backup = Util.fpsBackup
+        if not backup then return end
+        Util.fpsBackup = nil
+        pcall(function()
+            if backup.shadows ~= nil then
+                Lighting.GlobalShadows = backup.shadows
+            end
+        end)
+        pcall(function()
+            if backup.quality ~= nil then
+                settings().Rendering.QualityLevel = backup.quality
+            end
+        end)
+    end
+end
+
+-- Rejoin: volta pro mesmo servidor (se estiver sozinho, entra num servidor novo)
+function Util.rejoin()
+    local TeleportService = game:GetService("TeleportService")
+    notify(L("rejoining"), "refresh-cw", 3)
+    if #Players:GetPlayers() <= 1 then
+        pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
+    else
+        pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end)
+    end
+end
+
+-- Server Hop: pula pra outro servidor público que não esteja cheio
+function Util.serverHop()
+    notify(L("hop_search"), "search", 3)
+    local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId)
+        .. "/servers/Public?sortOrder=Asc&limit=100"
+
+    local okGet, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    local okJson, data = false, nil
+    if okGet and type(body) == "string" then
+        okJson, data = pcall(function()
+            return HttpService:JSONDecode(body)
+        end)
+    end
+    if not (okJson and type(data) == "table" and type(data.data) == "table") then
+        notify(L("hop_fail"), "triangle-alert", 3)
+        return
+    end
+
+    local list = {}
+    for _, s in ipairs(data.data) do
+        if type(s) == "table" and s.id ~= game.JobId
+            and type(s.playing) == "number" and type(s.maxPlayers) == "number"
+            and s.playing < s.maxPlayers - 1 then
+            list[#list + 1] = s.id
+        end
+    end
+    if #list == 0 then
+        notify(L("hop_none"), "triangle-alert", 3)
+        return
+    end
+
+    local TeleportService = game:GetService("TeleportService")
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, list[math.random(1, #list)], LocalPlayer)
+    end)
+end
+
+-- Copia o ID do servidor (JobId)
+function Util.copyServerId()
+    local copy = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+    if type(copy) ~= "function" then
+        notify(L("no_clip"), "triangle-alert", 3)
+        return
+    end
+    if pcall(copy, tostring(game.JobId)) then
+        notify(L("copied"), "check", 2.5)
+    else
+        notify(L("no_clip"), "triangle-alert", 3)
+    end
+end
+
+-- Auto Save: salva as opções a cada 20s (e ao descarregar o script)
+loop("autosave", 20, function()
+    if State.AutoSave then
+        saveConfig()
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
 --  15. INTERFACE (WindUI)
 --  Minimize a janela e use o botão "BUK" (botão de abrir da WindUI,
 --  arrastável) para abrir de novo. No PC use também a tecla do menu
@@ -2605,6 +2861,16 @@ buildUI = function()
 
     local uiReady = false -- evita que callbacks da criação mexam no State
 
+    -- tema salvo (se o nome não existir mais na WindUI, volta pro Dark)
+    local startTheme = "Dark"
+    pcall(function()
+        local themes = WindUI:GetThemes()
+        if type(themes) == "table" and themes[State.Theme] then
+            startTheme = State.Theme
+        end
+    end)
+    State.Theme = startTheme
+
     -- Avisos (usa as notificações da WindUI; os ícones são nomes do Lucide)
     NotifyImpl = function(text, icon, duration)
         WindUI:Notify({
@@ -2621,8 +2887,8 @@ buildUI = function()
         Author       = "by Linesketon02",
         Folder       = "Buk",
         Icon         = "skull",
-        Theme        = "Dark",
-        Transparent  = true,
+        Theme        = startTheme,
+        Transparent  = State.Transparent,
         Size         = UDim2.fromOffset(500, 330),
         SideBarWidth = 170,
     })
@@ -2659,13 +2925,14 @@ buildUI = function()
     local TabPick     = newTab("tab_pick", "crosshair")
     local TabSheriff  = newTab("tab_sheriff", "target")
     local TabTroll    = newTab("tab_troll", "zap")
+    local TabNews     = newTab("tab_news", "newspaper")
     local TabSettings = newTab("tab_settings", "settings")
 
     -- ───────────── ajudantes ─────────────
     -- Seção da WindUI (se a versão não tiver seção com elementos, usa a própria aba)
-    local function newSection(tab, title)
+    local function newSection(tab, title, opened)
         local ok, sec = pcall(function()
-            return tab:Section({ Title = title, Opened = true })
+            return tab:Section({ Title = title, Opened = opened ~= false })
         end)
         if ok and type(sec) == "table" and type(sec.Toggle) == "function" then
             return sec
@@ -2699,8 +2966,7 @@ buildUI = function()
     end
 
     -- ───────────── MAIN ─────────────
-    local InfoSec = newSection(TabMain, L("sec_info"))
-    InfoSec:Paragraph({ Title = L("info_author"), Desc = L("info_menu") })
+    -- (sem conteúdo por enquanto)
 
     -- ───────────── PLAYER ─────────────
     local MoveSec = newSection(TabPlayer, L("sec_move"))
@@ -2785,9 +3051,16 @@ buildUI = function()
         end,
     })
     addToggle(MagicSec, L("magic_predict"), "AimPredict")
+    addToggle(MagicSec, L("wall_shot"), "WallShot", function(v)
+        if v then
+            if not installAimHook() then
+                notify(L("no_hook"), "triangle-alert", 4)
+            end
+        else
+            Aim.clearTags()
+        end
+    end)
 
-    local AutoPickSec = newSection(TabSheriff, L("sec_autopick"))
-    addToggle(AutoPickSec, L("autopick_gun"), "AutoPickGun")
 
     -- ───────────── TROLL ─────────────
     -- 1) Fling (liga/desliga)   2) Escolher o player   3) Velocidade sempre no máximo
@@ -2864,6 +3137,48 @@ buildUI = function()
         end,
     }
 
+    -- ───────────── NEWS ─────────────
+    -- Lista das atualizações aplicadas (a mais recente fica aberta, as outras fechadas)
+    local NEWS = {
+        { title = "v1.2  •  Latest", groups = {
+            { title = "➕ Added", items = {
+                "Shoot Through Walls option in the Aimbot MM2 tab",
+                "News tab (this one) with every update",
+                "Settings: Theme, Transparent Window, Notifications, Auto Save and Delete Saved Settings",
+                "Utilities: Anti-AFK and FPS Boost",
+                "Server: Rejoin, Server Hop and Copy Server ID",
+            } },
+            { title = "🔧 Fixed", items = {
+                "Auto Farm no longer goes back to coins it already collected",
+            } },
+            { title = "❌ Removed", items = {
+                "Auto Pick Dropped Gun",
+                "Info texts from the Main tab",
+            } },
+        } },
+        { title = "v1.1", groups = {
+            { title = "➕ Added", items = {
+                "Underground Farm: collects coins from below the map (only during a match)",
+                "New Esp Name card: role color dot, name and distance, well above the head",
+            } },
+            { title = "⚡ Improved", items = {
+                "Auto Farm rewritten: smooth movement, no jitter, stops safely when the match ends or you die",
+                "Tabs reordered",
+                "Main tab icon fixed",
+            } },
+        } },
+    }
+
+    for i, release in ipairs(NEWS) do
+        local sec = newSection(TabNews, release.title, i == 1)
+        for _, group in ipairs(release.groups) do
+            sec:Paragraph({
+                Title = group.title,
+                Desc  = "• " .. table.concat(group.items, "\n• "),
+            })
+        end
+    end
+
     -- ───────────── SETTINGS ─────────────
     local MenuSec = newSection(TabSettings, L("sec_menu"))
     MenuSec:Keybind({
@@ -2877,21 +3192,6 @@ buildUI = function()
                 pcall(function()
                     Window:SetToggleKey(kc)
                 end)
-            end
-        end,
-    })
-
-    MenuSec:Button({
-        Title    = L("save_btn"),
-        Callback = function()
-            if not Compat.files then
-                notify(L("no_files"), "triangle-alert", 3)
-                return
-            end
-            if saveConfig() then
-                notify(L("saved_text"), "save", 2.5)
-            else
-                notify(L("save_fail_text"), "triangle-alert", 3)
             end
         end,
     })
@@ -2913,8 +3213,101 @@ buildUI = function()
         end,
     })
 
+    local LookSec = newSection(TabSettings, L("sec_look"))
+    local themeNames = {}
     pcall(function()
-        TabMain:Select()
+        for name in pairs(WindUI:GetThemes()) do
+            themeNames[#themeNames + 1] = name
+        end
+    end)
+    table.sort(themeNames)
+    if #themeNames > 0 then
+        LookSec:Dropdown({
+            Title    = L("theme"),
+            Values   = themeNames,
+            Value    = State.Theme,
+            Multi    = false,
+            Callback = function(option)
+                if not uiReady then return end
+                if type(option) == "table" then option = option.Title or option[1] end
+                if type(option) == "string" then
+                    State.Theme = option
+                    pcall(function()
+                        WindUI:SetTheme(option)
+                    end)
+                end
+            end,
+        })
+    end
+    addToggle(LookSec, L("transparent"), "Transparent", function(v)
+        pcall(function()
+            Window:ToggleTransparency(v)
+        end)
+    end)
+    addToggle(LookSec, L("notifs"), "Notify")
+
+    local CfgSec = newSection(TabSettings, L("sec_config"))
+    addToggle(CfgSec, L("autosave"), "AutoSave")
+    CfgSec:Button({
+        Title    = L("save_btn"),
+        Callback = function()
+            if not Compat.files then
+                notify(L("no_files"), "triangle-alert", 3)
+                return
+            end
+            if saveConfig() then
+                notify(L("saved_text"), "save", 2.5)
+            else
+                notify(L("save_fail_text"), "triangle-alert", 3)
+            end
+        end,
+    })
+    CfgSec:Button({
+        Title    = L("delete_btn"),
+        Callback = function()
+            if not (Compat.files and type(delfile) == "function") then
+                notify(L("no_files"), "triangle-alert", 3)
+                return
+            end
+            local ok = pcall(function()
+                if isfile(CONFIG_FILE) then
+                    delfile(CONFIG_FILE)
+                end
+            end)
+            if ok then
+                notify(L("deleted_text"), "trash-2", 3)
+            else
+                notify(L("save_fail_text"), "triangle-alert", 3)
+            end
+        end,
+    })
+
+    local UtilSec = newSection(TabSettings, L("sec_util"))
+    addToggle(UtilSec, L("anti_afk"), "AntiAFK", Util.setAntiAfk)
+    addToggle(UtilSec, L("fps_boost"), "FpsBoost", Util.setFpsBoost)
+
+    local SrvSec = newSection(TabSettings, L("sec_server"))
+    SrvSec:Button({
+        Title    = L("rejoin"),
+        Callback = function()
+            task.spawn(Util.rejoin)
+        end,
+    })
+    SrvSec:Button({
+        Title    = L("hop"),
+        Callback = function()
+            task.spawn(Util.serverHop)
+        end,
+    })
+    SrvSec:Button({
+        Title    = L("copy_id"),
+        Callback = function()
+            Util.copyServerId()
+        end,
+    })
+
+    pcall(function()
+        TabNews:Select()
     end)
 
     uiReady = true
@@ -2925,11 +3318,15 @@ end
 -- ═══════════════════════════════════════════════════════════
 Unload = function()
     if not alive then return end
+    if State.AutoSave then pcall(saveConfig) end
     alive = false
+    pcall(Util.setAntiAfk, false)
+    pcall(Util.setFpsBoost, false)
     pcall(Farm.release) -- sobe de volta pra superfície se estava embaixo do mapa
     magicAim   = nil
     forcedAim  = nil
     Aim.active = false
+    pcall(Aim.clearTags) -- devolve as peças que viraram "atravessáveis"
     State.Fling = false -- o loop do Fling percebe, volta pra origem e termina
 
     for _, c in ipairs(connections) do
@@ -2967,7 +3364,9 @@ end)
 if okBuild then
     -- aplica as opções carregadas do arquivo que têm efeito imediato
     setPickButtonVisible(State.PickButton)
-    if State.MagicBullet then
+    if State.AntiAFK then Util.setAntiAfk(true) end
+    if State.FpsBoost then Util.setFpsBoost(true) end
+    if State.MagicBullet or State.WallShot then
         pcall(installAimHook)
     end
     notify(L("loaded"), "check", 4)
