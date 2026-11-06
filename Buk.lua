@@ -5,7 +5,7 @@
     ║  UI: WindUI                          ║
     ╚══════════════════════════════════════╝
 
-    Abas: Main | Player | Auto Farm | ESP | Weapon | Aimbot MM2 | Troll | News | Settings
+    Abas: Main | Player | Auto Farm | ESP | Weapon | Aimbot MM2 | Troll | Discord | Settings
     Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
     Celular: minimize a janela e use o botão "BUK" (arrastável) para abrir de novo
 ]]
@@ -97,7 +97,7 @@ local GuiParent = Compat.guiParent()
 -- ═══════════════════════════════════════════════════════════
 local WHITE  = Color3.new(1, 1, 1)
 local BLACK  = Color3.new(0, 0, 0)
-local ACCENT = Color3.fromRGB(224, 58, 62)   -- vermelho MM2 (Murderer)
+local ACCENT = Color3.fromRGB(255, 126, 182)  -- rosa Cute (botão da arma, bordas)
 
 local ROLE_COLORS = {
     Innocent = Color3.fromRGB(74, 222, 128),
@@ -109,6 +109,12 @@ local NAME_NEUTRAL = Color3.fromRGB(110, 114, 135)
 
 local ESP_MAX_DIST  = 500  -- distância máxima fixa dos ESPs
 
+-- Aba Discord: coloque aqui o convite do SEU servidor (só o código, ex: "abc123",
+-- ou o link inteiro "https://discord.gg/abc123"). Também dá pra colar o convite
+-- dentro do menu (aba Discord > Invite) que ele fica salvo.
+local DISCORD_INVITE  = "wm8NPdtuGP"
+local DISCORD_REFRESH = 20 -- de quantos em quantos segundos atualiza os números
+
 
 -- ═══════════════════════════════════════════════════════════
 --  4. IDIOMA (English fixo)
@@ -118,8 +124,19 @@ local Lang = "en"
 local STR = {
     en = {
         tab_main = "Main", tab_player = "Player", tab_visuals = "ESP", tab_pick = "Weapon", tab_farm = "Auto Farm",
-        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_settings = "Settings", tab_news = "News",
+        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_settings = "Settings", tab_discord = "Discord",
         sec_move = "Movement", sec_protect = "Protection",
+        anticheat = "Anti-Cheat",
+        ac_nohook = "Your executor can't hook Anti-Kick (hookmetamethod). Other protections stay on.",
+        ac_info_t = "What Anti-Cheat does",
+        ac_info_d = "• Blocks kicks sent by the game (Anti-Kick)\n• Blocks reports sent to remotes named anticheat / cheat / exploit\n• Auto Farm uses humanized speed and tiny random pauses\n• No script is 100% undetectable. Use with moderation.",
+        sec_dc_server = "Server", sec_dc_stats = "Members", sec_dc_actions = "Actions", sec_dc_cfg = "Invite",
+        dc_members = "👥  Members", dc_online = "🟢  Online", dc_offline = "⚫  Offline", dc_live = "📡  Live data",
+        dc_loading = "Loading Discord...", dc_loading_d = "Fetching server info...",
+        dc_nocode = "Paste your server invite in the Invite box below (example: discord.gg/abc123).",
+        dc_fail = "Couldn't load the server. Check the invite and your connection.",
+        dc_refresh = "Refresh Now", dc_copy = "Copy Invite Link", dc_invite = "Invite", dc_invite_ph = "discord.gg/yourcode",
+        dc_copied = "Invite link copied.", dc_refreshing = "Refreshing...",
         cframe = "CFrame", cframe_speed = "CFrame Speed", inf_jump = "Infinite Jump",
         noclip = "Noclip", anti_fling = "Anti-Fling",
         sec_name = "Esp Name", esp_name = "Esp Name",
@@ -160,6 +177,9 @@ local STR = {
         no_hook = "Your executor doesn't support Magic Bullet (hook).",
         saved_text = "Settings saved successfully.",
         save_fail_text = "Couldn't save the settings.",
+        dc_updated = "Updated %ds ago  •  refreshes every %ds",
+        dc_stale = "Couldn't refresh right now. Showing the last data.",
+        dc_nodata = "No data yet",
         no_files = "Your executor can't save files (writefile).",
         close_confirm = "Tap again to unload the script.",
         none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
@@ -212,7 +232,7 @@ local State = {
 
     -- Auto Farm
     FarmOn    = false,
-    FarmSpeed = 22, -- fixo (sem slider)
+    FarmSpeed = 70, -- fixo (sem slider). Era 22. Com Anti-Cheat ligado a velocidade varia ±12% a cada trecho
     FarmUnder = true, -- true: anda por BAIXO do mapa e sobe só pra pegar a moeda
     FarmSafe  = true,
     FarmLimit = 40,
@@ -227,8 +247,14 @@ local State = {
     AutoSave    = false,  -- salva as opções sozinho
     AntiAFK     = false,
     FpsBoost    = false,
-    Theme       = "Dark", -- tema da WindUI
+    ThemeName   = "Cute", -- tema da WindUI (Cute = rosa; Cute Light = rosa claro)
     Transparent = true,   -- janela transparente
+
+    -- Anti-Cheat (anti-kick, bloqueio de remotes de detecção, farm humanizado)
+    AntiCheat = true,
+
+    -- Discord (convite colado no menu; vazio = usa DISCORD_INVITE do topo do script)
+    DiscordInvite = "",
 }
 
 -- true enquanto o Fling está rodando (pausa Noclip, Anti-Fling, CFrame e Auto Farm)
@@ -374,7 +400,8 @@ local SAVE_KEYS = {
     "CFrameOn", "CFrameSpeed", "InfJump", "Noclip", "AntiFling",
     "MagicBullet", "WallShot", "AimPart", "AimPredict",
     "FarmSafe", "FarmLimit", "FarmReset", "FarmUnder",
-    "Notify", "AutoSave", "AntiAFK", "FpsBoost", "Theme", "Transparent",
+    "Notify", "AutoSave", "AntiAFK", "FpsBoost", "ThemeName", "Transparent",
+    "AntiCheat", "DiscordInvite",
 }
 
 local function saveConfig()
@@ -1074,7 +1101,7 @@ do
     corner.Parent = PickBtn
 
     local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new(Color3.fromRGB(58, 24, 28), Color3.fromRGB(12, 10, 12))
+    gradient.Color = ColorSequence.new(Color3.fromRGB(96, 44, 86), Color3.fromRGB(34, 18, 40))
     gradient.Rotation = 90
     gradient.Parent = PickBtn
 
@@ -1456,7 +1483,8 @@ function Farm.glide(root, hum, coin, goal, speed)
             return "timeout"
         end
 
-        local dt = math.min(RunService.Heartbeat:Wait(), 0.1)
+        -- passo máximo por frame limitado (nada de "teleportes" grandes quando o FPS cai)
+        local dt = math.min(RunService.Heartbeat:Wait(), 0.05)
         if not Farm.pos then
             return "stopped" -- o Auto Farm foi solto enquanto esperava o frame
         end
@@ -1475,7 +1503,7 @@ end
 -- Espera a moeda sumir (foi coletada). Retorna true se coletou.
 function Farm.waitCollected(coin)
     local t0 = os.clock()
-    while alive and State.FarmOn and not Farm.isCollected(coin) and os.clock() - t0 < 0.4 do
+    while alive and State.FarmOn and not Farm.isCollected(coin) and os.clock() - t0 < 0.25 do
         task.wait()
     end
     return Farm.isCollected(coin)
@@ -1633,6 +1661,10 @@ loop("farm", 0.03, function()
 
     local coinPos = coin.Position
     local speed   = math.max(State.FarmSpeed, 1)
+    if State.AntiCheat then
+        -- Anti-Cheat: velocidade humanizada (varia um pouco a cada trecho)
+        speed = speed * (0.88 + math.random() * 0.24)
+    end
     local result
 
     if State.FarmUnder then
@@ -1686,6 +1718,8 @@ loop("farm", 0.03, function()
 
         if State.FarmSafe then
             task.wait(0.02 + math.random() * 0.08)
+        elseif State.AntiCheat then
+            task.wait(math.random() * 0.04) -- micro pausa aleatória (Anti-Cheat)
         end
 
     elseif result == "timeout" then
@@ -2802,6 +2836,285 @@ loop("autosave", 20, function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
+--  14C. ANTI-CHEAT
+--  - Anti-Kick: o jogo não consegue te kickar (hook do __namecall + hookfunction no Kick)
+--  - Bloqueia FireServer/InvokeServer vindos do jogo em remotes com nome de detecção
+--    (anticheat, cheat, exploit, hacker, violation, suspicious)
+--  - Auto Farm humanizado (velocidade variável e micro pausas): veja a seção 11
+--  Obs.: nenhum script garante 100% contra detecção. Use com moderação.
+-- ═══════════════════════════════════════════════════════════
+local AC = {
+    hooked   = false, -- hook do __namecall instalado
+    kickHook = false, -- hook direto no Kick instalado
+    old      = nil,   -- __namecall original
+    kicks    = 0,     -- kicks bloqueados
+    blocked  = 0,     -- remotes de detecção bloqueados
+    words    = { "anticheat", "anti_cheat", "anti-cheat", "cheat", "exploit", "hacker", "violation", "suspicious" },
+}
+
+function AC.badRemote(inst)
+    local name = inst.Name:lower()
+    for _, w in ipairs(AC.words) do
+        if name:find(w, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+function AC.handler(self, ...)
+    if not (alive and State.AntiCheat) or typeof(self) ~= "Instance" then
+        return AC.old(self, ...)
+    end
+
+    local method = getnamecallmethod()
+
+    -- só mexe em chamadas que vêm do jogo (as do seu executor passam direto)
+    if not (checkcaller and checkcaller()) then
+        if self == LocalPlayer and (method == "Kick" or method == "kick") then
+            AC.kicks = AC.kicks + 1
+            return nil
+        end
+
+        if method == "FireServer" or method == "InvokeServer" then
+            local cn = self.ClassName
+            if (cn == "RemoteEvent" or cn == "RemoteFunction") and AC.badRemote(self) then
+                AC.blocked = AC.blocked + 1
+                return nil
+            end
+        end
+    end
+
+    if setnamecallmethod then
+        setnamecallmethod(method)
+    end
+    return AC.old(self, ...)
+end
+
+-- Retorna true se pelo menos uma proteção ficou ativa
+function AC.install()
+    if not AC.hooked and getnamecallmethod then
+        local fn = newcclosure and newcclosure(AC.handler) or AC.handler
+
+        if hookmetamethod then
+            local ok, old = pcall(hookmetamethod, game, "__namecall", fn)
+            if ok and old ~= nil then
+                AC.old    = old
+                AC.hooked = true
+            end
+        end
+
+        if not AC.hooked and getrawmetatable then
+            local ok = pcall(function()
+                local mt = getrawmetatable(game)
+                AC.old = mt.__namecall
+                if setreadonly then
+                    setreadonly(mt, false)
+                elseif make_writeable then
+                    make_writeable(mt)
+                end
+                mt.__namecall = fn
+                if setreadonly then
+                    setreadonly(mt, true)
+                end
+            end)
+            AC.hooked = (ok and AC.old ~= nil)
+        end
+    end
+
+    -- reforço: pega também LocalPlayer.Kick(LocalPlayer, ...) chamado direto
+    if not AC.kickHook and hookfunction then
+        pcall(function()
+            local wrap = newcclosure or function(f) return f end
+            local oldKick
+            oldKick = hookfunction(LocalPlayer.Kick, wrap(function(self, ...)
+                if alive and State.AntiCheat and self == LocalPlayer
+                    and not (checkcaller and checkcaller()) then
+                    AC.kicks = AC.kicks + 1
+                    return nil
+                end
+                return oldKick(self, ...)
+            end))
+            AC.kickHook = true
+        end)
+    end
+
+    return AC.hooked or AC.kickHook
+end
+
+function AC.setEnabled(on)
+    if on and not AC.install() then
+        notify(L("ac_nohook"), "triangle-alert", 4)
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════
+--  14D. DISCORD: dados do servidor ao vivo (API pública de convites)
+--  Usa o convite de State.DiscordInvite (menu) ou DISCORD_INVITE (topo do script).
+--  Atualiza sozinho a cada DISCORD_REFRESH segundos: membros, online e offline.
+-- ═══════════════════════════════════════════════════════════
+local Discord = {
+    info      = nil,   -- dados do último carregamento ok
+    err       = nil,   -- "nocode" | "http" | "invalid" (último erro)
+    okAt      = 0,     -- quando carregou com sucesso
+    fetchedAt = 0,     -- última tentativa (ok ou não)
+    startedAt = 0,
+    fetching  = false,
+    onUpdate  = nil,   -- preenchidos pela interface
+    onTick    = nil,
+}
+
+-- Extrai só o código do convite (aceita "abc123", "discord.gg/abc123" ou o link completo)
+function Discord.code()
+    local raw = tostring(State.DiscordInvite or ""):gsub("%s", "")
+    if raw == "" then
+        raw = tostring(DISCORD_INVITE or ""):gsub("%s", "")
+    end
+    return raw:match("discord%.gg/([%w%-_]+)")
+        or raw:match("discord%.com/invite/([%w%-_]+)")
+        or raw:match("discordapp%.com/invite/([%w%-_]+)")
+        or raw:match("^([%w%-_]+)$")
+end
+
+function Discord.http(url)
+    local ok, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok and type(body) == "string" and #body > 0 then
+        return body
+    end
+
+    -- plano B: request do executor (devolve o corpo mesmo em erro 404)
+    local req = (syn and syn.request) or (http and http.request) or http_request or request
+    if type(req) == "function" then
+        local ok2, res = pcall(req, { Url = url, Method = "GET" })
+        if ok2 and type(res) == "table" and type(res.Body) == "string" and #res.Body > 0 then
+            return res.Body
+        end
+    end
+    return nil
+end
+
+-- Retorna: info (tabela) ou nil + motivo
+function Discord.fetch()
+    local code = Discord.code()
+    if not code then
+        return nil, "nocode"
+    end
+
+    local body = Discord.http("https://discord.com/api/v10/invites/" .. code .. "?with_counts=true")
+    if not body then
+        return nil, "http"
+    end
+
+    local okJ, data = pcall(function()
+        return HttpService:JSONDecode(body)
+    end)
+    local g = okJ and type(data) == "table" and data.guild
+    if type(g) ~= "table" then
+        return nil, "invalid"
+    end
+
+    local info = {
+        code     = code,
+        id       = tostring(g.id or ""),
+        name     = tostring(g.name or "Discord"),
+        desc     = (type(g.description) == "string" and g.description ~= "") and g.description or nil,
+        members  = tonumber(data.approximate_member_count) or 0,
+        online   = tonumber(data.approximate_presence_count) or 0,
+        boosts   = tonumber(g.premium_subscription_count) or 0,
+        verified = false,
+    }
+    if type(g.features) == "table" then
+        for _, f in ipairs(g.features) do
+            if f == "VERIFIED" or f == "PARTNERED" then
+                info.verified = true
+            end
+        end
+    end
+    if type(g.icon) == "string" and info.id ~= "" then
+        info.icon = "https://cdn.discordapp.com/icons/" .. info.id .. "/" .. g.icon .. ".png?size=256"
+    end
+    return info
+end
+
+-- Busca em segundo plano. force = ignora o intervalo (botão "Refresh Now" e convite novo)
+function Discord.refresh(force)
+    local now = os.clock()
+    if Discord.fetching and now - Discord.startedAt < 25 then
+        return
+    end
+    if not force and now - Discord.fetchedAt < DISCORD_REFRESH then
+        return
+    end
+
+    Discord.fetching  = true
+    Discord.startedAt = now
+
+    task.spawn(function()
+        local ok, info, err = pcall(Discord.fetch)
+        if not ok then
+            info, err = nil, "http"
+        end
+
+        Discord.fetching  = false
+        Discord.fetchedAt = os.clock()
+        if info then
+            Discord.info = info
+            Discord.err  = nil
+            Discord.okAt = os.clock()
+        else
+            Discord.err = err
+            -- convite sem código / inválido: não deixa dados velhos de outro servidor na tela
+            if err == "nocode" or err == "invalid" then
+                Discord.info = nil
+            end
+        end
+
+        if Discord.onUpdate then
+            pcall(Discord.onUpdate)
+        end
+    end)
+end
+
+function Discord.fmt(n)
+    local s = tostring(math.floor(tonumber(n) or 0))
+    local k
+    repeat
+        s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+    until k == 0
+    return s
+end
+
+function Discord.bar(frac, width)
+    width = width or 14
+    local n = math.floor(math.clamp(frac, 0, 1) * width + 0.5)
+    return string.rep("▰", n) .. string.rep("▱", width - n)
+end
+
+function Discord.copy(text)
+    local copy = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+    if type(copy) ~= "function" then
+        notify(L("no_clip"), "triangle-alert", 3)
+        return
+    end
+    if pcall(copy, text) then
+        notify(L("dc_copied"), "check", 2.5)
+    else
+        notify(L("no_clip"), "triangle-alert", 3)
+    end
+end
+
+-- A cada 1s: atualiza o "há Ns" e busca de novo quando o intervalo passou
+loop("discord", 1, function()
+    if not Discord.onUpdate then return end
+    Discord.refresh(false)
+    if Discord.onTick then
+        Discord.onTick()
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
 --  15. INTERFACE (WindUI)
 --  Minimize a janela e use o botão "BUK" (botão de abrir da WindUI,
 --  arrastável) para abrir de novo. No PC use também a tecla do menu
@@ -2842,6 +3155,7 @@ end
 destroyUI = function()
     NotifyImpl = nil
     FlingDropdown, FlingToggle = nil, nil
+    Discord.onUpdate, Discord.onTick = nil, nil
 
     local win = WindUIWindow
     WindUIWindow = nil
@@ -2861,15 +3175,62 @@ buildUI = function()
 
     local uiReady = false -- evita que callbacks da criação mexam no State
 
+    -- Temas Cute: copiam um tema da própria WindUI (Dark / Light) e trocam as cores,
+    -- assim nenhuma chave do tema fica faltando em versões diferentes da biblioteca
+    pcall(function()
+        local themes = WindUI:GetThemes()
+
+        local function makeTheme(name, baseName, colors)
+            local base = themes[baseName] or themes.Dark
+            local t = {}
+            if type(base) == "table" then
+                for k, v in pairs(base) do
+                    t[k] = v
+                end
+            end
+            t.Name = name
+            for k, hex in pairs(colors) do
+                t[k] = Color3.fromHex(hex)
+            end
+            WindUI:AddTheme(t)
+        end
+
+        -- Cute: ameixa escura com rosa-chiclete (bom com a janela transparente)
+        makeTheme("Cute", "Dark", {
+            Accent      = "#ff7eb6",
+            Dialog      = "#3a2347",
+            Outline     = "#ffadd2",
+            Text        = "#fff1f8",
+            Placeholder = "#c79bbd",
+            Background  = "#2a1a33",
+            Button      = "#d4609f",
+            Icon        = "#ffc2e0",
+            Hover       = "#fff1f8",
+        })
+
+        -- Cute Light: rosa bebê com texto ameixa
+        makeTheme("Cute Light", "Light", {
+            Accent      = "#ff6fae",
+            Dialog      = "#fff0f7",
+            Outline     = "#f7a8cf",
+            Text        = "#5a2a48",
+            Placeholder = "#b88aa3",
+            Background  = "#ffe3f0",
+            Button      = "#ffc0dd",
+            Icon        = "#c2468a",
+            Hover       = "#5a2a48",
+        })
+    end)
+
     -- tema salvo (se o nome não existir mais na WindUI, volta pro Dark)
     local startTheme = "Dark"
     pcall(function()
         local themes = WindUI:GetThemes()
-        if type(themes) == "table" and themes[State.Theme] then
-            startTheme = State.Theme
+        if type(themes) == "table" and themes[State.ThemeName] then
+            startTheme = State.ThemeName
         end
     end)
-    State.Theme = startTheme
+    State.ThemeName = startTheme
 
     -- Avisos (usa as notificações da WindUI; os ícones são nomes do Lucide)
     NotifyImpl = function(text, icon, duration)
@@ -2886,7 +3247,7 @@ buildUI = function()
         Title        = "Buk",
         Author       = "by Linesketon02",
         Folder       = "Buk",
-        Icon         = "skull",
+        Icon         = "heart",
         Theme        = startTheme,
         Transparent  = State.Transparent,
         Size         = UDim2.fromOffset(500, 330),
@@ -2904,6 +3265,7 @@ buildUI = function()
             Enabled    = true,
             Draggable  = true,
             OnlyMobile = false,
+            Color      = ColorSequence.new(Color3.fromHex("#ff7eb6"), Color3.fromHex("#c58bff")),
         })
     end)
     pcall(function()
@@ -2925,7 +3287,7 @@ buildUI = function()
     local TabPick     = newTab("tab_pick", "crosshair")
     local TabSheriff  = newTab("tab_sheriff", "target")
     local TabTroll    = newTab("tab_troll", "zap")
-    local TabNews     = newTab("tab_news", "newspaper")
+    local TabDiscord  = newTab("tab_discord", "message-circle")
     local TabSettings = newTab("tab_settings", "settings")
 
     -- ───────────── ajudantes ─────────────
@@ -2976,11 +3338,16 @@ buildUI = function()
     addToggle(MoveSec, L("noclip"), "Noclip")
 
     local ProtectSec = newSection(TabPlayer, L("sec_protect"))
+    addToggle(ProtectSec, L("anticheat"), "AntiCheat", AC.setEnabled)
     addToggle(ProtectSec, L("anti_fling"), "AntiFling", function(v)
         if not v then
             restoreBackup(antiBackup)
         end
     end)
+    ProtectSec:Paragraph({
+        Title = L("ac_info_t"),
+        Desc  = L("ac_info_d"),
+    })
 
     -- ───────────── AUTO FARM ─────────────
     -- (o Auto Farm nunca liga sozinho na próxima execução)
@@ -3137,47 +3504,154 @@ buildUI = function()
         end,
     }
 
-    -- ───────────── NEWS ─────────────
-    -- Lista das atualizações aplicadas (a mais recente fica aberta, as outras fechadas)
-    local NEWS = {
-        { title = "v1.2  •  Latest", groups = {
-            { title = "➕ Added", items = {
-                "Shoot Through Walls option in the Aimbot MM2 tab",
-                "News tab (this one) with every update",
-                "Settings: Theme, Transparent Window, Notifications, Auto Save and Delete Saved Settings",
-                "Utilities: Anti-AFK and FPS Boost",
-                "Server: Rejoin, Server Hop and Copy Server ID",
-            } },
-            { title = "🔧 Fixed", items = {
-                "Auto Farm no longer goes back to coins it already collected",
-            } },
-            { title = "❌ Removed", items = {
-                "Auto Pick Dropped Gun",
-                "Info texts from the Main tab",
-            } },
-        } },
-        { title = "v1.1", groups = {
-            { title = "➕ Added", items = {
-                "Underground Farm: collects coins from below the map (only during a match)",
-                "New Esp Name card: role color dot, name and distance, well above the head",
-            } },
-            { title = "⚡ Improved", items = {
-                "Auto Farm rewritten: smooth movement, no jitter, stops safely when the match ends or you die",
-                "Tabs reordered",
-                "Main tab icon fixed",
-            } },
-        } },
-    }
+    -- ───────────── DISCORD ─────────────
+    -- Ícone do servidor, membros, online e offline, tudo atualizando sozinho.
+    -- Os números vêm de Discord.info (módulo 14D); aqui só montamos e atualizamos a tela.
+    local DC = { card = nil, cardKey = nil, last = {} }
 
-    for i, release in ipairs(NEWS) do
-        local sec = newSection(TabNews, release.title, i == 1)
-        for _, group in ipairs(release.groups) do
-            sec:Paragraph({
-                Title = group.title,
-                Desc  = "• " .. table.concat(group.items, "\n• "),
-            })
+    local DcServerSec = newSection(TabDiscord, L("sec_dc_server"))
+    local DcStatsSec  = newSection(TabDiscord, L("sec_dc_stats"))
+    local DcActionSec = newSection(TabDiscord, L("sec_dc_actions"))
+    local DcCfgSec    = newSection(TabDiscord, L("sec_dc_cfg"))
+
+    -- troca título/descrição de um Paragraph (só mexe quando o texto mudou)
+    local function dcSet(key, obj, title, desc)
+        if not obj then return end
+        local sig = tostring(title) .. "|" .. tostring(desc)
+        if DC.last[key] == sig then return end
+        local ok = pcall(function()
+            if title ~= nil then obj:SetTitle(title) end
+            if desc ~= nil then obj:SetDesc(desc) end
+        end)
+        if ok then
+            DC.last[key] = sig
         end
     end
+
+    -- cartão do servidor (ícone + nome + convite). Recriado só se o servidor/ícone mudar.
+    local function dcMakeCard(info)
+        if DC.card then
+            pcall(function() DC.card:Destroy() end)
+            DC.card = nil
+        end
+        DC.last.card = nil
+
+        local cfg = { Title = L("dc_loading"), Desc = L("dc_loading_d") }
+        if info then
+            cfg.Title = info.name .. (info.verified and "  ✔" or "")
+            local lines = {}
+            if info.desc then
+                lines[#lines + 1] = info.desc
+            end
+            lines[#lines + 1] = "discord.gg/" .. info.code
+            if info.boosts > 0 then
+                lines[#lines + 1] = "💎 " .. info.boosts .. " boosts"
+            end
+            cfg.Desc = table.concat(lines, "\n")
+            if info.icon then
+                cfg.Image     = info.icon
+                cfg.ImageSize = 56
+            end
+        end
+
+        local ok, obj = pcall(function()
+            return DcServerSec:Paragraph(cfg)
+        end)
+        if not ok and cfg.Image then
+            -- executor sem suporte pra baixar a imagem: cria o cartão sem o ícone
+            cfg.Image, cfg.ImageSize = nil, nil
+            ok, obj = pcall(function()
+                return DcServerSec:Paragraph(cfg)
+            end)
+        end
+        DC.card    = ok and obj or nil
+        DC.cardKey = info and (info.id .. "|" .. info.name .. "|" .. tostring(info.icon)) or nil
+    end
+
+    dcMakeCard(nil)
+
+    local pMembers = DcStatsSec:Paragraph({ Title = L("dc_members"), Desc = "—" })
+    local pOnline  = DcStatsSec:Paragraph({ Title = L("dc_online"),  Desc = "—" })
+    local pOffline = DcStatsSec:Paragraph({ Title = L("dc_offline"), Desc = "—" })
+    local pLive    = DcStatsSec:Paragraph({ Title = L("dc_live"),    Desc = "—" })
+
+    -- chamada quando chegam dados novos (ou um erro)
+    local function dcApply()
+        local info = Discord.info
+
+        if not info then
+            if DC.cardKey ~= nil or not DC.card then
+                dcMakeCard(nil)
+            end
+            dcSet("card", DC.card, "Discord", (Discord.err == "nocode") and L("dc_nocode") or L("dc_fail"))
+            dcSet("members", pMembers, nil, "—")
+            dcSet("online",  pOnline,  nil, "—")
+            dcSet("offline", pOffline, nil, "—")
+            return
+        end
+
+        local key = info.id .. "|" .. info.name .. "|" .. tostring(info.icon)
+        if DC.cardKey ~= key or not DC.card then
+            dcMakeCard(info)
+        end
+
+        local total   = info.members
+        local online  = math.min(info.online, total)
+        local offline = math.max(total - online, 0)
+        local onFrac  = total > 0 and online / total or 0
+        local offFrac = total > 0 and offline / total or 0
+
+        dcSet("members", pMembers, nil, Discord.fmt(total))
+        dcSet("online",  pOnline,  nil, string.format("%s   •   %d%%\n%s",
+            Discord.fmt(online), math.floor(onFrac * 100 + 0.5), Discord.bar(onFrac)))
+        dcSet("offline", pOffline, nil, string.format("%s   •   %d%%\n%s",
+            Discord.fmt(offline), math.floor(offFrac * 100 + 0.5), Discord.bar(offFrac)))
+    end
+
+    -- chamada 1x por segundo: "atualizado há Ns"
+    local function dcTick()
+        local txt
+        if Discord.info then
+            local ago = math.max(0, math.floor(os.clock() - Discord.okAt))
+            txt = (Discord.err and "🟠  " or "🟢  ") .. L("dc_updated", ago, DISCORD_REFRESH)
+            if Discord.err then
+                txt = txt .. "\n" .. L("dc_stale")
+            end
+        else
+            txt = "🔴  " .. L("dc_nodata")
+        end
+        dcSet("live", pLive, nil, txt)
+    end
+
+    DcActionSec:Button({
+        Title    = L("dc_refresh"),
+        Callback = function()
+            notify(L("dc_refreshing"), "refresh-cw", 1.5)
+            Discord.refresh(true)
+        end,
+    })
+    DcActionSec:Button({
+        Title    = L("dc_copy"),
+        Callback = function()
+            local code = (Discord.info and Discord.info.code) or Discord.code()
+            if code then
+                Discord.copy("https://discord.gg/" .. code)
+            else
+                notify(L("dc_nocode"), "triangle-alert", 3)
+            end
+        end,
+    })
+
+    DcCfgSec:Input({
+        Title       = L("dc_invite"),
+        Value       = State.DiscordInvite,
+        Placeholder = L("dc_invite_ph"),
+        Callback    = function(text)
+            if not uiReady then return end
+            State.DiscordInvite = tostring(text or "")
+            Discord.refresh(true)
+        end,
+    })
 
     -- ───────────── SETTINGS ─────────────
     local MenuSec = newSection(TabSettings, L("sec_menu"))
@@ -3225,13 +3699,13 @@ buildUI = function()
         LookSec:Dropdown({
             Title    = L("theme"),
             Values   = themeNames,
-            Value    = State.Theme,
+            Value    = State.ThemeName,
             Multi    = false,
             Callback = function(option)
                 if not uiReady then return end
                 if type(option) == "table" then option = option.Title or option[1] end
                 if type(option) == "string" then
-                    State.Theme = option
+                    State.ThemeName = option
                     pcall(function()
                         WindUI:SetTheme(option)
                     end)
@@ -3307,10 +3781,18 @@ buildUI = function()
     })
 
     pcall(function()
-        TabNews:Select()
+        TabPlayer:Select()
     end)
 
     uiReady = true
+
+    -- Discord: só liga os callbacks e faz a 1ª busca com a interface 100% pronta
+    Discord.onUpdate = dcApply
+    Discord.onTick   = dcTick
+    if Discord.info then
+        pcall(dcApply) -- (a interface foi recriada: mostra de novo os dados que já tínhamos)
+    end
+    Discord.refresh(true)
 end
 
 -- ═══════════════════════════════════════════════════════════
@@ -3368,6 +3850,9 @@ if okBuild then
     if State.FpsBoost then Util.setFpsBoost(true) end
     if State.MagicBullet or State.WallShot then
         pcall(installAimHook)
+    end
+    if State.AntiCheat then
+        pcall(AC.setEnabled, true)
     end
     notify(L("loaded"), "check", 4)
 else
