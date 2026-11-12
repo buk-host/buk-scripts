@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Full Bright, FPS Boost, Pular Costas, Radar, Anti-Void, Trocar de Servidor) | Player (CFrame Speed até 300) | Esp | Painel (Lock On, Trocar Alvo, Auto Desvio) | Mod (Câmera, Câmera Atravessa Parede) | Settings
+    Abas: Main (Full Bright, FPS Boost, Grudar nas Costas, Radar, Anti-Void, Trocar de Servidor) | Player (CFrame Speed até 300) | Esp | Painel (Lock On, Auto Desvio) | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -21,7 +21,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
@@ -63,7 +62,7 @@ end
 local lastNotify = {}
 
 -- Aviso na tela, no máximo 1 a cada 2s por tipo (não enche a tela de notificação).
--- Fica aqui em cima porque o Lock On (Trocar Alvo) também usa.
+-- Fica aqui em cima porque várias partes do script usam.
 local function notifyOnce(key, title, content)
     local now = os.clock()
     if lastNotify[key] and now - lastNotify[key] < 2 then
@@ -297,7 +296,6 @@ local LockOn = {
     PartName = "HumanoidRootPart",
     MaxDistance = 300,
     AutoSwitch = false, -- quando o alvo morre/sai/fica longe, pula sozinho pro próximo mais perto
-    List = nil, -- lista de alvos (do mais perto pro mais longe) que o Trocar Alvo está percorrendo
 }
 
 local LockGui, LockButton
@@ -321,6 +319,17 @@ local function getOrigin()
     end
     local cam = Workspace.CurrentCamera
     return cam and cam.CFrame.Position or Vector3.zero
+end
+
+-- Humanoid e HumanoidRootPart do player, só se ele estiver vivo (senão devolve nil, nil)
+local function getAlive(plr)
+    local char = plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if hum and root and hum.Health > 0 then
+        return hum, root
+    end
+    return nil, nil
 end
 
 local function findNearestTarget()
@@ -361,7 +370,6 @@ local function refreshLockButton()
 end
 
 local function setLockActive(active)
-    LockOn.List = nil -- trava nova (ou desligada): o Trocar Alvo monta uma lista nova
     if active then
         local target = findNearestTarget()
         if target then
@@ -381,87 +389,6 @@ local function setLockActive(active)
         LockOn.Active = false
     end
     refreshLockButton()
-end
-
--- Esse player ainda dá pra travar? (vivo, no jogo e dentro da distância máxima)
-local function isTargetable(plr)
-    if plr == LocalPlayer then
-        return false
-    end
-    local part = getTargetPart(plr)
-    return part ~= nil and (part.Position - getOrigin()).Magnitude <= LockOn.MaxDistance
-end
-
--- Todo mundo que dá pra travar agora, do mais perto pro mais longe
-local function buildTargetList()
-    local origin = getOrigin()
-    local entries = {}
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if isTargetable(plr) then
-            table.insert(entries, { plr = plr, dist = (getTargetPart(plr).Position - origin).Magnitude })
-        end
-    end
-    table.sort(entries, function(a, b)
-        return a.dist < b.dist
-    end)
-
-    local list = {}
-    for i, entry in ipairs(entries) do
-        list[i] = entry.plr
-    end
-    return list
-end
-
--- Primeiro da lista, depois do alvo atual, que ainda dá pra travar
-local function nextInList(list, current)
-    for i = (table.find(list, current) or 0) + 1, #list do
-        if list[i] ~= current and isTargetable(list[i]) then
-            return list[i]
-        end
-    end
-    return nil
-end
-
--- Passa a trava pro próximo player mais perto.
--- A ordem (mais perto -> mais longe) é tirada uma vez e seguida até o fim, então todo mundo
--- aparece antes de repetir, mesmo com os players se mexendo. No fim, tira a ordem de novo.
-local function switchLockTarget()
-    if not LockOn.Enabled then
-        notifyOnce("switch", "Trocar Alvo", "Ligue o Lock On primeiro.")
-        return
-    end
-    if not LockOn.Active then
-        setLockActive(true) -- ainda sem trava: trava no mais perto
-        return
-    end
-
-    local current = LockOn.Target
-    local list = LockOn.List
-    local nextTarget = list and nextInList(list, current)
-
-    if not nextTarget then
-        -- fim da lista (ou ainda não tinha lista): tira uma lista nova
-        local fresh = buildTargetList()
-        LockOn.List = fresh
-        if not list then
-            nextTarget = nextInList(fresh, current) -- lista nova no meio do caminho: segue depois do atual
-        end
-        if not nextTarget then
-            -- recomeça a rodada pelo mais perto (que não seja o atual)
-            for _, plr in ipairs(fresh) do
-                if plr ~= current then
-                    nextTarget = plr
-                    break
-                end
-            end
-        end
-    end
-
-    if nextTarget then
-        LockOn.Target = nextTarget
-    else
-        notifyOnce("switch", "Trocar Alvo", "Não tem outro player por perto.")
-    end
 end
 
 -- Coloca uma ScreenGui na tela: gethui/CoreGui (se o executor permitir), senão PlayerGui
@@ -609,36 +536,6 @@ local function setLockEnabled(state)
     end
 end
 
--- Botão flutuante "Trocar Alvo": passa a trava pro próximo player mais perto
-local SwitchGui, SwitchButton
-
-local function createSwitchGui()
-    if SwitchGui then
-        return
-    end
-    local cam = Workspace.CurrentCamera
-    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
-
-    -- Fica logo acima do botão do Lock On
-    SwitchGui, SwitchButton = createFloatingButton(
-        "BukSwitch",
-        "TROCAR\nALVO",
-        math.max(vp.X - BUTTON_SIZE - 240, 0),
-        math.max(vp.Y * 0.5 - BUTTON_SIZE / 2 - BUTTON_SIZE - 16, 0),
-        switchLockTarget
-    )
-    SwitchButton.TextSize = 11
-end
-
-local function setSwitchButtonEnabled(state)
-    if state then
-        createSwitchGui()
-    end
-    if SwitchGui then
-        SwitchGui.Enabled = state
-    end
-end
-
 -- Roda depois do script de câmera do Roblox para a trava valer
 pcall(function()
     RunService:UnbindFromRenderStep("BukLockOn")
@@ -667,11 +564,225 @@ RunService:BindToRenderStep("BukLockOn", Enum.RenderPriority.Camera.Value + 1, f
             return
         end
         LockOn.Target = nextTarget
-        LockOn.List = nil
         part = getTargetPart(nextTarget)
     end
 
     cam.CFrame = CFrame.lookAt(cam.CFrame.Position, part.Position)
+end)
+
+----------------------------------------------------------------
+-- Grudar nas Costas (escolhe o player no menu + botão flutuante)
+----------------------------------------------------------------
+local Stick = {
+    Enabled = false, -- mostra o botão flutuante
+    Active = false, -- grudado agora (botão apertado)
+    Waiting = false, -- true enquanto o alvo está morto: espera ele voltar pra grudar de novo
+    Target = nil, -- Player escolhido no menu
+    Distance = 3, -- quantos studs atrás do alvo você fica
+    Options = {}, -- texto do dropdown -> Player
+    LastBehind = nil, -- última direção "atrás" válida (se o alvo cair/ragdoll não vira de lado)
+}
+
+local StickGui, StickButton
+local StickDropdown -- criado lá embaixo, na aba Main
+local STICK_NONE = "Nenhum"
+local FLAT = Vector3.new(1, 0, 1)
+
+local stickParams = RaycastParams.new()
+stickParams.FilterType = Enum.RaycastFilterType.Exclude
+stickParams.RespectCanCollide = true
+local stickFilterMe, stickFilterThem
+
+local function stickLabel(plr)
+    return plr.DisplayName .. " (@" .. plr.Name .. ")"
+end
+
+-- Texto de cada opção do dropdown (menos você e quem está saindo), em ordem alfabética
+local function buildStickOptions(leaving)
+    local plrs = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr ~= leaving then
+            table.insert(plrs, plr)
+        end
+    end
+    table.sort(plrs, function(a, b)
+        return stickLabel(a):lower() < stickLabel(b):lower()
+    end)
+
+    local labels = { STICK_NONE }
+    table.clear(Stick.Options)
+    for _, plr in ipairs(plrs) do
+        local label = stickLabel(plr)
+        Stick.Options[label] = plr
+        table.insert(labels, label)
+    end
+    return labels
+end
+
+local function refreshStickButton()
+    if not StickButton then
+        return
+    end
+    local stroke = StickButton:FindFirstChildOfClass("UIStroke")
+    if Stick.Active then
+        StickButton.Text = "GRUDAR\nON"
+        StickButton.BackgroundColor3 = Color3.fromRGB(24, 60, 38)
+        if stroke then
+            stroke.Color = Color3.fromRGB(70, 255, 110)
+        end
+    else
+        StickButton.Text = "GRUDAR\nOFF"
+        StickButton.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
+        if stroke then
+            stroke.Color = Color3.fromRGB(255, 255, 255)
+        end
+    end
+end
+
+local function setStickActive(active)
+    Stick.Waiting = false
+    if active then
+        local target = Stick.Target
+        if not target then
+            Stick.Active = false
+            notifyOnce("stick", "Grudar nas Costas", "Escolha um player na aba Main primeiro.")
+        elseif not getAlive(target) then
+            Stick.Active = false
+            notifyOnce("stick", "Grudar nas Costas", "Esse player não está vivo agora.")
+        else
+            Stick.Active = true
+        end
+    else
+        Stick.Active = false
+    end
+    refreshStickButton()
+end
+
+-- Chamado quando você escolhe alguém no dropdown. Se já estava grudado, passa a grudar no novo.
+local function selectStickTarget(label)
+    local plr = Stick.Options[label]
+    Stick.Target = plr
+    Stick.Waiting = false
+    if not plr then
+        setStickActive(false)
+    end
+end
+
+-- Atualiza a lista do dropdown (alguém entrou ou saiu). `leaving` = quem está saindo agora.
+local function refreshStickList(leaving)
+    if leaving and Stick.Target == leaving then
+        Stick.Target = nil
+        setStickActive(false)
+        notifyOnce("stickLeft", "Grudar nas Costas", leaving.DisplayName .. " saiu do jogo.")
+    end
+
+    local labels = buildStickOptions(leaving)
+    if not StickDropdown then
+        return
+    end
+
+    local current = Stick.Target and stickLabel(Stick.Target) or STICK_NONE
+    pcall(function()
+        StickDropdown:Refresh(labels)
+    end)
+    pcall(function()
+        StickDropdown:Select(current)
+    end)
+end
+
+connect(Players.PlayerAdded, function()
+    refreshStickList()
+end)
+connect(Players.PlayerRemoving, refreshStickList)
+
+local function createStickGui()
+    if StickGui then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
+
+    -- Fica logo abaixo do botão do Lock On
+    StickGui, StickButton = createFloatingButton(
+        "BukStick",
+        "GRUDAR\nOFF",
+        math.max(vp.X - BUTTON_SIZE - 240, 0),
+        math.clamp(vp.Y * 0.5 + BUTTON_SIZE / 2 + 16, 0, math.max(vp.Y - BUTTON_SIZE, 0)),
+        function()
+            setStickActive(not Stick.Active)
+        end
+    )
+    StickButton.TextSize = 11
+    refreshStickButton()
+end
+
+local function setStickEnabled(state)
+    Stick.Enabled = state
+    if state then
+        createStickGui()
+    else
+        setStickActive(false)
+    end
+    if StickGui then
+        StickGui.Enabled = state
+    end
+end
+
+-- Todo frame: fica atrás do alvo, olhando pra ele, e acompanha ele pra onde for
+connect(RunService.Heartbeat, function()
+    if not (Stick.Enabled and Stick.Active) then
+        return
+    end
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root) or hum.Health <= 0 then
+        return
+    end
+
+    local target = Stick.Target
+    local tRoot
+    if target then
+        local _, r = getAlive(target)
+        tRoot = r
+    end
+
+    if not tRoot then
+        -- alvo morto (ou renascendo): continua ligado e gruda de novo quando ele voltar
+        if not Stick.Waiting then
+            Stick.Waiting = true
+            notifyOnce("stickWait", "Grudar nas Costas", "O alvo morreu. Eu grudo de novo quando ele voltar.")
+        end
+        return
+    end
+    Stick.Waiting = false
+
+    -- "Atrás" = o lado contrário de pra onde o alvo está olhando (só no plano horizontal)
+    local look = tRoot.CFrame.LookVector * FLAT
+    local behind
+    if look.Magnitude >= 0.05 then
+        behind = -look.Unit
+        Stick.LastBehind = behind
+    else
+        behind = Stick.LastBehind or Vector3.zAxis
+    end
+
+    -- Parede atrás do alvo: fica mais perto dele em vez de entrar na parede
+    if stickFilterMe ~= char or stickFilterThem ~= target.Character then
+        stickFilterMe, stickFilterThem = char, target.Character
+        stickParams.FilterDescendantsInstances = { char, target.Character }
+    end
+    local dist = Stick.Distance
+    local hit = Workspace:Raycast(tRoot.Position, behind * (dist + 1.5), stickParams)
+    if hit then
+        dist = math.max(hit.Distance - 1.5, 1.5)
+    end
+
+    local pos = tRoot.Position + behind * dist
+    root.CFrame = CFrame.lookAt(pos, Vector3.new(tRoot.Position.X, pos.Y, tRoot.Position.Z))
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
 end)
 
 ----------------------------------------------------------------
@@ -690,34 +801,6 @@ local Combat = {
         Busy = false, -- true enquanto o passo acontece (não empilha um desvio em cima do outro)
     },
 }
-
--- Reativa os botões à força (botão "Restaurar Botões" na aba Mod)
-local function restoreControls()
-    pcall(function()
-        GuiService.TouchControlsEnabled = true
-    end)
-    pcall(function()
-        local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
-        local module = scripts and scripts:FindFirstChild("PlayerModule")
-        if module then
-            local controls = require(module):GetControls()
-            controls:Enable()
-            if UserInputService.TouchEnabled then
-                controls:OnLastInputTypeChanged(Enum.UserInputType.Touch)
-            end
-        end
-    end)
-end
-
-local function getAlive(plr)
-    local char = plr.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if hum and root and hum.Health > 0 then
-        return hum, root
-    end
-    return nil, nil
-end
 
 -- Player vivo mais perto de você dentro da distância de detecção (ou nil)
 local function findThreat(myRoot)
@@ -807,8 +890,12 @@ connect(RunService.Heartbeat, function()
 
     local now = os.clock()
 
+    -- Grudado nas costas de alguém: o Grudar manda na posição e na direção do personagem,
+    -- então o Virar pro Alvo e o Auto Desvio ficam quietos enquanto isso.
+    local sticking = Stick.Enabled and Stick.Active and not Stick.Waiting
+
     -- Virar pro alvo do Lock On
-    if Combat.FaceTarget and LockOn.Enabled and LockOn.Active and LockOn.Target then
+    if not sticking and Combat.FaceTarget and LockOn.Enabled and LockOn.Active and LockOn.Target then
         local part = getTargetPart(LockOn.Target)
         if part then
             local p = part.Position
@@ -821,7 +908,7 @@ connect(RunService.Heartbeat, function()
 
     -- Auto Desvio
     local D = Combat.Dodge
-    if D.Enabled and not D.Busy and now - D.Last >= D.Cooldown then
+    if D.Enabled and not sticking and not D.Busy and now - D.Last >= D.Cooldown then
         local threat = findThreat(root)
         if threat then
             D.Last = now
@@ -994,126 +1081,8 @@ local function setPerfEnabled(state)
 end
 
 ----------------------------------------------------------------
--- Main: Pular pras Costas, Radar e Anti-Void
+-- Main: Radar e Anti-Void
 ----------------------------------------------------------------
------ Pular pras Costas -----
-local Back = {
-    Enabled = false, -- mostra o botão flutuante
-    Distance = 4, -- quantos studs atrás do alvo você aparece
-    MaxRange = 100, -- alvo mais longe que isso = não pula
-    Cooldown = 0.35,
-    Last = 0,
-}
-
-local BackGui, BackButton
-
--- Alvo do pulo: quem está travado no Lock On; se não tiver, o player mais perto
-local function getBackTarget()
-    local locked = LockOn.Active and LockOn.Target
-    if locked and getAlive(locked) then
-        return locked
-    end
-    return findNearestTarget()
-end
-
-local function jumpBehindTarget()
-    local now = os.clock()
-    if now - Back.Last < Back.Cooldown then
-        return
-    end
-
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not (hum and root) or hum.Health <= 0 then
-        return
-    end
-
-    local target = getBackTarget()
-    if not target then
-        notifyOnce("back", "Pular pras Costas", "Nenhum player por perto.")
-        return
-    end
-    local _, tRoot = getAlive(target)
-    if not tRoot then
-        return
-    end
-
-    local toTarget = tRoot.Position - root.Position
-    if toTarget.Magnitude > Back.MaxRange then
-        notifyOnce("back", "Pular pras Costas", "Alvo muito longe. Aumente o alcance máximo do pulo.")
-        return
-    end
-
-    -- "Atrás" = o lado contrário de pra onde o alvo está olhando (só no plano horizontal)
-    local flat = Vector3.new(1, 0, 1)
-    local look = tRoot.CFrame.LookVector * flat
-    if look.Magnitude < 0.05 then
-        look = -(toTarget * flat)
-    end
-    if look.Magnitude < 0.05 then
-        look = Vector3.zAxis
-    end
-    local behind = -look.Unit
-
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { char, target.Character }
-
-    -- Parede atrás do alvo: aparece mais perto dele em vez de entrar na parede
-    local dist = Back.Distance
-    local hit = Workspace:Raycast(tRoot.Position, behind * (dist + 1.5), params)
-    if hit then
-        dist = math.max(hit.Distance - 1.5, 1.5)
-    end
-
-    -- Precisa ter chão onde vai aparecer (tenta a distância cheia e depois mais perto)
-    local pos
-    for _, factor in ipairs({ 1, 0.6, 0.3 }) do
-        local candidate = tRoot.Position + behind * math.max(dist * factor, 1.5) + Vector3.new(0, 0.5, 0)
-        if hasGroundBelow(candidate, params, 80) then
-            pos = candidate
-            break
-        end
-    end
-    if not pos then
-        notifyOnce("back", "Pular pras Costas", "Sem chão atrás do alvo.")
-        return
-    end
-
-    Back.Last = now
-    root.CFrame = CFrame.lookAt(pos, Vector3.new(tRoot.Position.X, pos.Y, tRoot.Position.Z))
-    root.AssemblyLinearVelocity = Vector3.zero
-end
-
-local function createBackGui()
-    if BackGui then
-        return
-    end
-    local cam = Workspace.CurrentCamera
-    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
-
-    -- Fica logo abaixo do botão do Lock On
-    BackGui, BackButton = createFloatingButton(
-        "BukBack",
-        "COSTAS",
-        math.max(vp.X - BUTTON_SIZE - 240, 0),
-        math.clamp(vp.Y * 0.5 + BUTTON_SIZE / 2 + 16, 0, math.max(vp.Y - BUTTON_SIZE, 0)),
-        jumpBehindTarget
-    )
-    BackButton.TextSize = 12
-end
-
-local function setBackEnabled(state)
-    Back.Enabled = state
-    if state then
-        createBackGui()
-    end
-    if BackGui then
-        BackGui.Enabled = state
-    end
-end
-
 ----- Radar -----
 local Radar = {
     Enabled = false,
@@ -1687,45 +1656,6 @@ local function setCamLockEnabled(state)
     end
 end
 
--- Câmera atravessa parede: troca o modo de oclusão da câmera padrão do Roblox de "Zoom"
--- (puxa a câmera pra perto quando tem parede) pra "Invisicam" (a parede fica transparente).
--- Só funciona se o jogo usar o PlayerModule/câmera padrão; em câmera própria não muda nada.
-local WallCam = {
-    Enabled = false,
-    Original = nil, -- modo que o jogo usava antes de ligar
-}
-
-local function wallCamNow()
-    local mode = Enum.DevCameraOcclusionMode.Invisicam
-    if LocalPlayer.DevCameraOcclusionMode ~= mode then
-        LocalPlayer.DevCameraOcclusionMode = mode
-    end
-end
-
-local function applyWallCam()
-    if WallCam.Enabled then
-        pcall(wallCamNow) -- confere todo frame: se o jogo voltar o modo, a gente põe de novo
-    end
-end
-
-local function setWallCamEnabled(state)
-    if state then
-        if WallCam.Original == nil then
-            WallCam.Original = LocalPlayer.DevCameraOcclusionMode
-        end
-        WallCam.Enabled = true
-        applyWallCam()
-    else
-        WallCam.Enabled = false
-        if WallCam.Original ~= nil then
-            pcall(function()
-                LocalPlayer.DevCameraOcclusionMode = WallCam.Original
-            end)
-        end
-        WallCam.Original = nil
-    end
-end
-
 -- Roda por último no frame (prioridade máxima): nada consegue passar por cima
 pcall(function()
     RunService:UnbindFromRenderStep("BukFOV")
@@ -1733,7 +1663,6 @@ end)
 RunService:BindToRenderStep("BukFOV", Enum.RenderPriority.Last.Value, function()
     applyFOV()
     applyCamLock()
-    applyWallCam()
     applyBright()
 end)
 
@@ -1758,14 +1687,13 @@ local function Unload()
     setBrightEnabled(false)
     setPerfEnabled(false)
     setCamLockEnabled(false)
-    setWallCamEnabled(false)
-    Back.Enabled = false
+    Stick.Enabled = false
+    Stick.Active = false
+    Stick.Target = nil
     Radar.Enabled = false
     AntiVoid.Enabled = false
-    destroyGui(BackGui)
-    BackGui, BackButton = nil, nil
-    destroyGui(SwitchGui)
-    SwitchGui, SwitchButton = nil, nil
+    destroyGui(StickGui)
+    StickGui, StickButton = nil, nil
     destroyGui(RadarGui)
     RadarGui, RadarFrame = nil, nil
     table.clear(Radar.Dots)
@@ -1949,46 +1877,37 @@ MainTab:Toggle({
     end,
 })
 
------ Pular pras Costas -----
-local BackSection = MainTab:Section({ Title = "Pular pras Costas", Opened = true })
+----- Grudar nas Costas -----
+local StickSection = MainTab:Section({ Title = "Grudar nas Costas", Opened = true })
 
-BackSection:Toggle({
-    Title = "Botão Pular Costas",
-    Desc = "Mostra um botão flutuante. Toque nele pra aparecer atrás do alvo do Lock On (ou do player mais perto).",
-    Flag = "back_button",
+-- Sem Flag de propósito: o player escolhido não é salvo (na próxima partida a lista é outra)
+StickDropdown = StickSection:Dropdown({
+    Title = "Escolher Player",
+    Desc = "Escolha em quem grudar. A lista atualiza sozinha quando alguém entra ou sai.",
+    Values = buildStickOptions(),
+    Value = STICK_NONE,
+    Callback = function(selected)
+        selectStickTarget(selected)
+    end,
+})
+
+StickSection:Toggle({
+    Title = "Botão Grudar",
+    Desc = "Mostra um botão flutuante (igual ao Lock On). Toque nele pra ir até o player escolhido e ficar grudado nas costas dele, seguindo ele pra onde for. Toque de novo pra soltar.",
+    Flag = "stick_button",
     Value = false,
     Callback = function(state)
-        setBackEnabled(state)
+        setStickEnabled(state)
     end,
 })
 
-BackSection:Button({
-    Title = "Pular pras Costas",
-    Desc = "Faz o pulo agora, direto do menu (mesmo alvo do botão flutuante).",
-    Icon = "zap",
-    Callback = function()
-        jumpBehindTarget()
-    end,
-})
-
-BackSection:Slider({
+StickSection:Slider({
     Title = "Distância atrás do alvo",
-    Flag = "back_distance",
+    Flag = "stick_distance",
     Step = 1,
-    Value = { Min = 2, Max = 10, Default = 4 },
+    Value = { Min = 2, Max = 10, Default = 3 },
     Callback = function(value)
-        Back.Distance = value
-    end,
-})
-
-BackSection:Slider({
-    Title = "Alcance máximo do pulo",
-    Desc = "Se o alvo estiver mais longe que isso, o pulo não acontece.",
-    Flag = "back_max_range",
-    Step = 10,
-    Value = { Min = 10, Max = 300, Default = 100 },
-    Callback = function(value)
-        Back.MaxRange = value
+        Stick.Distance = value
     end,
 })
 
@@ -2180,16 +2099,6 @@ LockSection:Toggle({
 })
 
 LockSection:Toggle({
-    Title = "Botão Trocar Alvo",
-    Desc = "Mostra um botão flutuante. Toque nele pra passar a trava pro próximo player mais perto (percorre todos antes de repetir).",
-    Flag = "lockon_switch_button",
-    Value = false,
-    Callback = function(state)
-        setSwitchButtonEnabled(state)
-    end,
-})
-
-LockSection:Toggle({
     Title = "Trocar Sozinho ao Morrer",
     Desc = "Quando o alvo morre, sai ou fica longe demais, a trava pula sozinha pro próximo mais perto em vez de desligar.",
     Flag = "lockon_auto_switch",
@@ -2199,18 +2108,9 @@ LockSection:Toggle({
     end,
 })
 
-LockSection:Button({
-    Title = "Trocar Alvo",
-    Desc = "Troca a trava agora, direto do menu (igual ao botão flutuante).",
-    Icon = "repeat",
-    Callback = function()
-        switchLockTarget()
-    end,
-})
-
 LockSection:Toggle({
     Title = "Travar Botão",
-    Desc = "Deixa os botões flutuantes (Lock On, Trocar Alvo e Pular Costas) e o Radar parados: eles não andam mais quando você toca.",
+    Desc = "Deixa os botões flutuantes (Lock On e Grudar) e o Radar parados: eles não andam mais quando você toca.",
     Flag = "lockon_button_locked",
     Value = false,
     Callback = function(state)
@@ -2343,33 +2243,6 @@ CamSection:Slider({
     Callback = function(value)
         CamLock.Distance = value
         applyCamLock()
-    end,
-})
-
-CamSection:Toggle({
-    Title = "Câmera Atravessa Parede",
-    Desc = "Parede ou pilar entre a câmera e você fica transparente, em vez de puxar a câmera pra perto. Combina com a Câmera Longe. Só funciona se o jogo usar a câmera padrão do Roblox.",
-    Flag = "cam_wall",
-    Value = false,
-    Callback = function(state)
-        setWallCamEnabled(state)
-    end,
-})
-
------ Segurança -----
-local SafeSection = ModTab:Section({ Title = "Segurança", Opened = true })
-
-SafeSection:Button({
-    Title = "Restaurar Botões",
-    Desc = "Use se o analógico ou os botões do Roblox/jogo pararem de responder.",
-    Icon = "rotate-ccw",
-    Callback = function()
-        restoreControls()
-        WindUI:Notify({
-            Title = "Buk",
-            Content = "Botões restaurados. Toque na tela uma vez.",
-            Duration = 3,
-        })
     end,
 })
 
