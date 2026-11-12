@@ -1,3684 +1,2457 @@
 --[[
-    ╔══════════════════════════════════════╗
-    ║  Buk                                 ║
-    ║  Developed by: Linesketon02          ║
-    ║  UI: WindUI                          ║
-    ╚══════════════════════════════════════╝
+    Buk
+    Created by: Line
+    UI Library: WindUI
 
-    Abas: Main | Player | Auto Farm | ESP | Weapon | Aimbot MM2 | Troll | Extras | Settings
-    Tecla para abrir/fechar: RightShift (muda em Settings > Menu Key)
-    Celular: minimize a janela e use o botão "BUK" (arrastável) para abrir de novo
+    Abas: Main (Full Bright, FPS Boost, Pular Costas, Radar, Anti-Void, Trocar de Servidor) | Player (CFrame Speed até 300) | Esp | Painel (Lock On, Trocar Alvo, Auto Desvio) | Mod (Câmera, Câmera Atravessa Parede) | Settings
+    Tecla para abrir/fechar o menu: RightShift
 ]]
 
--- ═══════════════════════════════════════════════════════════
---  0. LIMPEZA (se já estiver carregado, descarrega o anterior)
--- ═══════════════════════════════════════════════════════════
-local genv = (getgenv and getgenv()) or _G
-if genv.BukUnload then
-    pcall(genv.BukUnload)
+local env = (getgenv and getgenv()) or _G
+
+-- Evita duplicar: se o script já estiver rodando, descarrega a versão anterior
+if env.BukHub and type(env.BukHub.Unload) == "function" then
+    pcall(env.BukHub.Unload)
 end
 
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
-
--- ═══════════════════════════════════════════════════════════
---  1. SERVIÇOS
--- ═══════════════════════════════════════════════════════════
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local Workspace         = game:GetService("Workspace")
-local UserInputService  = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService      = game:GetService("TweenService")
-local CollectionService = game:GetService("CollectionService")
-local HttpService       = game:GetService("HttpService")
+----------------------------------------------------------------
+-- Services
+----------------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 
 local LocalPlayer = Players.LocalPlayer
-while not LocalPlayer do
-    task.wait()
-    LocalPlayer = Players.LocalPlayer
-end
-
 local Camera = Workspace.CurrentCamera
 
--- ═══════════════════════════════════════════════════════════
---  2. COMPATIBILIDADE (funciona em qualquer executor)
--- ═══════════════════════════════════════════════════════════
-local Compat = {}
+----------------------------------------------------------------
+-- WindUI
+----------------------------------------------------------------
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 
-Compat.files = (type(writefile) == "function")
-    and (type(readfile) == "function")
-    and (type(isfile) == "function")
+----------------------------------------------------------------
+-- Estado
+----------------------------------------------------------------
+local State = {
+    CFrameSpeed = false,
+    SpeedValue = 30,
 
-function Compat.protect(gui)
-    pcall(function()
-        if syn and syn.protect_gui then
-            syn.protect_gui(gui)
-        end
-    end)
-end
-
-function Compat.guiParent()
-    if Compat._parent then
-        return Compat._parent
-    end
-
-    local parent = nil
-    if gethui then
-        local ok, h = pcall(gethui)
-        if ok and typeof(h) == "Instance" then
-            parent = h
-        end
-    end
-
-    if not parent then
-        local ok, core = pcall(function()
-            return game:GetService("CoreGui")
-        end)
-        if ok and core then
-            local probe = Instance.new("Folder")
-            if pcall(function() probe.Parent = core end) then
-                parent = core
-            end
-            pcall(function() probe:Destroy() end)
-        end
-    end
-
-    parent = parent or LocalPlayer:WaitForChild("PlayerGui")
-    Compat._parent = parent
-    return parent
-end
-
-local GuiParent = Compat.guiParent()
-
--- ═══════════════════════════════════════════════════════════
---  3. CONSTANTES E CORES
--- ═══════════════════════════════════════════════════════════
-local WHITE  = Color3.new(1, 1, 1)
-local BLACK  = Color3.new(0, 0, 0)
-local ACCENT = Color3.fromRGB(224, 58, 62)   -- vermelho MM2 (Murderer)
-
-local ROLE_COLORS = {
-    Innocent = Color3.fromRGB(74, 222, 128),
-    Sheriff  = Color3.fromRGB(59, 130, 246),
-    Murderer = Color3.fromRGB(239, 68, 68),
-}
-local GUN_COLOR = Color3.fromRGB(255, 215, 0)
-local NAME_NEUTRAL = Color3.fromRGB(110, 114, 135)
-
-local ESP_MAX_DIST  = 500  -- distância máxima fixa dos ESPs
-
-
--- ═══════════════════════════════════════════════════════════
---  4. IDIOMA (English fixo)
--- ═══════════════════════════════════════════════════════════
-local Lang = "en"
-
-local STR = {
-    en = {
-        tab_main = "Main", tab_player = "Player", tab_visuals = "ESP", tab_pick = "Weapon", tab_farm = "Auto Farm",
-        tab_sheriff = "Aimbot MM2", tab_troll = "Troll", tab_settings = "Settings", tab_extras = "Extras",
-        sec_move = "Movement", sec_protect = "Protection",
-        cframe = "CFrame", cframe_speed = "CFrame Speed", inf_jump = "Infinite Jump",
-        noclip = "Noclip", anti_fling = "Anti-Fling",
-        sec_name = "Esp Name", esp_name = "Esp Name",
-        sec_roles = "Esp Roles", role_inn = "Innocent", role_sher = "Sheriff", role_murd = "Murderer",
-        sec_items = "Items & Arrows", items_dd = "Enable", gun_drop = "Gun Dropped",
-        arrow_murder = "Arrow to Murderer", arrow_sheriff = "Arrow to Sheriff",
-        sec_pick = "Weapon", pick_auto = "Auto Pick",
-        pick_screen = "On-Screen Button", sec_pick_pc = "PC", pick_key_on = "Keyboard Shortcut",
-        pick_key = "Shortcut Key", pick_cap = "GUN",
-        sec_farm = "Farm Coins", farm_on = "Auto Farm", farm_limit = "Max Coins per Round",
-        farm_safe = "Safe Mode", farm_reset = "Reset When Full",
-        farm_under = "Underground Farm", farm_speed = "Farm Speed",
-        sec_magic = "Magic Bullet", magic = "Magic Bullet",
-        magic_part = "Aim Part", part_torso = "Torso", part_head = "Head",
-        magic_predict = "Prediction (ping compensation)",
-        wall_shot = "Shoot Through Walls",
-        sec_fling = "Fling", fling = "Fling", fling_player = "Select Player",
-        fling_notarget = "Select a player first.", fling_dead = "You need to be alive.",
-        fling_norole = "No Sheriff/Murderer in the match right now.",
-        fling_tdead = "That player isn't alive right now.", fling_left = "The player left. Fling stopped.",
-        sec_menu = "Menu",
-        sec_xray = "X-Ray", xray = "X-Ray", xray_level = "X-Ray Transparency (%)",
-        sec_light = "Lighting", fullbright = "Fullbright", no_fog = "No Fog",
-        sec_camera = "Camera", fov_on = "Custom Field of View", fov = "Field of View",
-        unlock_zoom = "Unlock Camera Zoom",
-        sec_walk = "Walk", walk_on = "Custom Walk Speed", walk_speed = "Walk Speed",
-        sec_look = "Appearance", theme = "Theme", transparent = "Transparent Window", notifs = "Notifications",
-        sec_config = "Settings File", autosave = "Auto Save", delete_btn = "Delete Saved Settings",
-        deleted_text = "Saved settings deleted. Defaults load next time.",
-        sec_util = "Utilities", anti_afk = "Anti-AFK", fps_boost = "FPS Boost",
-        sec_server = "Server", rejoin = "Rejoin Server", hop = "Server Hop", copy_id = "Copy Server ID",
-        rejoining = "Rejoining...", hop_search = "Looking for another server...",
-        hop_none = "No other server found.", hop_fail = "Couldn't get the server list.",
-        copied = "Server ID copied.", no_clip = "Your executor can't copy to the clipboard.",
-        menu_key = "Menu Key", save_btn = "Save Settings", unload_btn = "Unload Script",
-        loaded = "Loaded successfully! by Linesketon02",
-        pick_ok = "Gun picked up!", pick_auto_ok = "Gun picked up automatically!",
-        pick_nogun = "No dropped gun on the ground.", pick_dead = "You need to be alive.",
-        pick_hasgun = "You already have the gun.", pick_fail = "Couldn't pick up the gun.",
-        flash_ok = "PICKED!", flash_nogun = "NO GUN", flash_dead = "DEAD",
-        flash_hasgun = "HAS GUN", flash_fail = "FAILED",
-        farm_full = "Bag full! Auto Farm paused until the next round.",
-        no_hook = "Your executor doesn't support Magic Bullet (hook).",
-        saved_text = "Settings saved successfully.",
-        save_fail_text = "Couldn't save the settings.",
-        no_files = "Your executor can't save files (writefile).",
-        close_confirm = "Tap again to unload the script.",
-        none = "None", select = "Select", selected_n = "%d selected", press_key = "Press a key...",
+    ESP = {
+        Name = false,
+        Health = false,
+        BoxCorner = false,
+        MaxDistance = 2000,
+        Color = Color3.fromRGB(255, 255, 255), -- branco (padrão)
     },
 }
 
-local function L(key, ...)
-    local text = (STR[Lang] and STR[Lang][key]) or STR.en[key] or key
-    if select("#", ...) > 0 then
-        return string.format(text, ...)
+local Connections = {}
+local Window -- definido mais abaixo
+local Config -- definido mais abaixo
+
+local function connect(signal, fn)
+    local c = signal:Connect(fn)
+    table.insert(Connections, c)
+    return c
+end
+
+local lastNotify = {}
+
+-- Aviso na tela, no máximo 1 a cada 2s por tipo (não enche a tela de notificação).
+-- Fica aqui em cima porque o Lock On (Trocar Alvo) também usa.
+local function notifyOnce(key, title, content)
+    local now = os.clock()
+    if lastNotify[key] and now - lastNotify[key] < 2 then
+        return
     end
-    return text
+    lastNotify[key] = now
+    WindUI:Notify({ Title = title, Content = content, Duration = 2 })
 end
 
--- ═══════════════════════════════════════════════════════════
---  5. ESTADO GLOBAL DAS OPÇÕES
--- ═══════════════════════════════════════════════════════════
-local State = {
-    -- Esp Roles (Chams)
-    RoleInnocent = false,
-    RoleSheriff  = false,
-    RoleMurderer = false,
-
-    -- Esp Name (nome acima da cabeça)
-    EspName = false,
-
-    -- Itens e setas
-    GunDrop      = false,
-    ArrowMurder  = false,
-    ArrowSheriff = false,
-
-    -- Weapon (Pick)
-    PickAuto   = false,
-    PickButton = false,
-    PickKeyOn  = false,
-    PickKey    = Enum.KeyCode.G,
-
-    -- Main
-    CFrameOn    = false,
-    CFrameSpeed = 30,
-    InfJump     = false,
-    Noclip      = false,
-    AntiFling   = false,
-    XRay        = false,
-    XRayLevel   = 60,     -- % de transparência do mapa
-
-    -- Extras
-    Fullbright  = false,
-    NoFog       = false,
-    FovOn       = false,
-    Fov         = 90,
-    UnlockZoom  = false,
-    WalkOn      = false,
-    WalkSpeed   = 24,
-
-    -- Sheriff
-    MagicBullet = false,
-    WallShot    = false,
-    AimPart     = "Torso",
-    AimPredict  = true,
-
-    -- Auto Farm
-    FarmOn    = false,
-    FarmSpeed = 25, -- slider 25 a 30 (aba Auto Farm)
-    FarmUnder = true, -- true: anda por BAIXO do mapa e sobe só pra pegar a moeda
-    FarmSafe  = true,
-    FarmLimit = 40,
-    FarmReset = false,
-
-    -- Troll (o Fling nunca liga sozinho; State.FlingTarget = nome do player escolhido)
-    Fling = false,
-
-    -- Menu
-    MenuKey = Enum.KeyCode.RightShift,
-    Notify      = true,   -- avisos na tela
-    AutoSave    = false,  -- salva as opções sozinho
-    AntiAFK     = false,
-    FpsBoost    = false,
-    Theme       = "Demon Slayer", -- tema da WindUI
-    Transparent = true,   -- janela transparente
-}
-
--- true enquanto o Fling está rodando (pausa Noclip, Anti-Fling, CFrame e Auto Farm)
-local flingRunning = false
-
--- ═══════════════════════════════════════════════════════════
---  5B. DESEMPENHO INTERNO
---  - Perf: valores fixos de otimização interna (antigo modo "Strong")
---      espStep     : tempo entre atualizações do ESP
---      cacheRefresh: de quanto em quanto tempo refaz listas de peças
---      arrowStep   : tempo entre atualizações das setas
---      roleStep    : cache da detecção de roles
--- ═══════════════════════════════════════════════════════════
-local Perf = {
-    espStep      = 1 / 30,
-    cacheRefresh = 1,
-    arrowStep    = 1 / 30,
-    roleStep     = 0.25,
-}
-
--- ═══════════════════════════════════════════════════════════
---  6. UTILIDADES
--- ═══════════════════════════════════════════════════════════
-local alive       = true
-local connections = {}
-local NotifyImpl  = nil -- aviso na tela (criado pela interface)
-
-local function track(conn)
-    connections[#connections + 1] = conn
-    return conn
-end
-
--- Avisa cada erro só uma vez por módulo (evita spam no console)
-local warned = {}
-local function safeWarn(err, tag)
-    tag = tag or "geral"
-    if not warned[tag] then
-        warned[tag] = true
-        warn("[Buk] (" .. tag .. ") " .. tostring(err))
-    end
-end
-
--- Loop protegido: se der erro numa volta, o loop continua rodando
-local function loop(tag, interval, fn)
-    task.spawn(function()
-        while alive do
-            task.wait(type(interval) == "function" and interval() or interval)
-            if not alive then break end
-            local ok, err = pcall(fn)
-            if not ok then safeWarn(err, tag) end
-        end
-    end)
-end
-
-local function notify(text, icon, duration)
-    if not NotifyImpl or State.Notify == false then return end
-    pcall(NotifyImpl, text, icon, duration)
-end
-
-local function newScreenGui(name, order)
-    local gui = Instance.new("ScreenGui")
-    gui.Name = name
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = order or 0
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    Compat.protect(gui)
-    gui.Parent = GuiParent
-    return gui
-end
-
--- Mostra um erro na tela (caso o menu não consiga abrir)
-local function showError(err)
-    warn("[Buk] " .. tostring(err))
-    pcall(function()
-        local gui = newScreenGui("BukError", 999)
-
-        local box = Instance.new("TextBox")
-        box.Size = UDim2.new(0.8, 0, 0.5, 0)
-        box.Position = UDim2.new(0.1, 0, 0.25, 0)
-        box.BackgroundColor3 = Color3.fromRGB(35, 10, 10)
-        box.TextColor3 = WHITE
-        box.TextXAlignment = Enum.TextXAlignment.Left
-        box.TextYAlignment = Enum.TextYAlignment.Top
-        box.TextWrapped = true
-        box.MultiLine = true
-        box.ClearTextOnFocus = false
-        box.Font = Enum.Font.Code
-        box.TextSize = 16
-        box.Text = "[Buk] " .. tostring(err)
-        box.Parent = gui
-
-        local close = Instance.new("TextButton")
-        close.Size = UDim2.fromOffset(36, 36)
-        close.Position = UDim2.new(0.9, -36, 0.25, 0)
-        close.BackgroundColor3 = Color3.fromRGB(224, 58, 62)
-        close.TextColor3 = WHITE
-        close.Font = Enum.Font.GothamBold
-        close.TextSize = 18
-        close.Text = "X"
-        close.ZIndex = 2
-        close.Parent = gui
-        close.MouseButton1Click:Connect(function()
+local function destroyGui(gui)
+    if gui then
+        pcall(function()
             gui:Destroy()
         end)
+    end
+end
+
+----------------------------------------------------------------
+-- ESP (Drawing API): Name, Health e Box Corner
+----------------------------------------------------------------
+local DrawingSupported = false
+do
+    local ok, obj = pcall(function()
+        return Drawing.new("Line")
     end)
+    if ok and obj then
+        DrawingSupported = true
+        pcall(function()
+            obj:Remove()
+        end)
+    end
 end
 
-local HighlightFolder = Instance.new("Folder")
-HighlightFolder.Name = "BukHighlights"
-HighlightFolder.Parent = GuiParent
+local ESPObjects = {}
 
-local function toKeyCode(key)
-    if typeof(key) == "EnumItem" then
-        return key
+local function newDrawing(class, props)
+    local obj = Drawing.new(class)
+    for k, v in pairs(props) do
+        obj[k] = v
     end
-    local ok, result = pcall(function()
-        return Enum.KeyCode[key]
-    end)
-    if ok then
-        return result
-    end
-    return nil
+    return obj
 end
 
-local function keyFrom(value)
-    if typeof(value) == "EnumItem" and value.EnumType == Enum.KeyCode then
-        return value
-    end
-    if type(value) == "string" then
-        return toKeyCode(value)
-    end
-    return nil
+local function setLine(line, ax, ay, bx, by, color)
+    line.From = Vector2.new(ax, ay)
+    line.To = Vector2.new(bx, by)
+    line.Color = color
+    line.Visible = true
 end
 
--- ═══════════════════════════════════════════════════════════
---  6B. CONFIGURAÇÕES SALVAS (arquivo JSON)
--- ═══════════════════════════════════════════════════════════
-local CONFIG_FILE = "Buk_Config.json"
-local SAVE_KEYS = {
-    "RoleInnocent", "RoleSheriff", "RoleMurderer", "EspName", "GunDrop", "ArrowMurder", "ArrowSheriff",
-    "PickAuto", "PickButton", "PickKeyOn",
-    "CFrameOn", "CFrameSpeed", "InfJump", "Noclip", "AntiFling",
-    "MagicBullet", "WallShot", "AimPart", "AimPredict",
-    "FarmSafe", "FarmLimit", "FarmReset", "FarmUnder", "FarmSpeed",
-    "XRay", "XRayLevel", "Fullbright", "NoFog", "FovOn", "Fov", "UnlockZoom", "WalkOn", "WalkSpeed",
-    "Notify", "AutoSave", "AntiAFK", "FpsBoost", "Theme", "Transparent",
-}
+local function createESP(plr)
+    if not DrawingSupported or plr == LocalPlayer then
+        return nil
+    end
+    if ESPObjects[plr] then
+        return ESPObjects[plr]
+    end
 
-local function saveConfig()
-    if not Compat.files then
-        return false
+    local obj = {
+        Name = newDrawing("Text", { Size = 14, Center = true, Outline = true, Visible = false }),
+        Health = newDrawing("Text", { Size = 13, Center = true, Outline = true, Visible = false }),
+        Corners = {},
+    }
+    for i = 1, 8 do
+        obj.Corners[i] = newDrawing("Line", { Thickness = 1.5, Visible = false })
     end
-    local data = {}
-    for _, k in ipairs(SAVE_KEYS) do
-        data[k] = State[k]
-    end
-    data.PickKey = State.PickKey.Name
-    local ok = pcall(function()
-        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
-    end)
-    return ok
+
+    ESPObjects[plr] = obj
+    return obj
 end
 
-local function loadConfig()
-    if not Compat.files then return end
-    pcall(function()
-        if not isfile(CONFIG_FILE) then return end
-        local data = HttpService:JSONDecode(readfile(CONFIG_FILE))
-        if type(data) ~= "table" then return end
+local function hideESP(obj)
+    obj.Name.Visible = false
+    obj.Health.Visible = false
+    for _, l in ipairs(obj.Corners) do
+        l.Visible = false
+    end
+end
 
-        for _, k in ipairs(SAVE_KEYS) do
-            local v = data[k]
-            if v ~= nil and type(v) == type(State[k]) then
-                State[k] = v
+local function removeESP(plr)
+    local obj = ESPObjects[plr]
+    if not obj then
+        return
+    end
+    ESPObjects[plr] = nil
+
+    local function rm(d)
+        pcall(function()
+            d:Remove()
+        end)
+    end
+    rm(obj.Name)
+    rm(obj.Health)
+    for _, l in ipairs(obj.Corners) do
+        rm(l)
+    end
+end
+
+local function updateESP(plr, obj, cfg)
+    local char = plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local head = char and char:FindFirstChild("Head")
+
+    if not (hum and root and head) or hum.Health <= 0 then
+        return hideESP(obj)
+    end
+
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local origin = myRoot and myRoot.Position or Camera.CFrame.Position
+    if (origin - root.Position).Magnitude > cfg.MaxDistance then
+        return hideESP(obj)
+    end
+
+    local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+    if not onScreen then
+        return hideESP(obj)
+    end
+
+    -- Caixa baseada na cabeça e nos pés
+    local topV = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, head.Size.Y / 2 + 0.2, 0))
+    local botV = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+
+    local height = math.abs(botV.Y - topV.Y)
+    local width = height * 0.6
+    local cx = rootPos.X
+    local x1, x2 = cx - width / 2, cx + width / 2
+    local y1, y2 = topV.Y, botV.Y
+    local color = cfg.Color
+
+    -- 1. Esp Name
+    if cfg.Name then
+        obj.Name.Text = plr.DisplayName
+        obj.Name.Position = Vector2.new(cx, y1 - 18)
+        obj.Name.Color = color
+        obj.Name.Visible = true
+    else
+        obj.Name.Visible = false
+    end
+
+    -- 2. Esp Health (vida atual / vida máxima)
+    if cfg.Health then
+        local maxHp = math.max(hum.MaxHealth, 1)
+        local ratio = math.clamp(hum.Health / maxHp, 0, 1)
+        obj.Health.Text = string.format("%d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
+        obj.Health.Position = Vector2.new(cx, y2 + 2)
+        obj.Health.Color = Color3.fromRGB(255, 60, 60):Lerp(Color3.fromRGB(70, 255, 110), ratio)
+        obj.Health.Visible = true
+    else
+        obj.Health.Visible = false
+    end
+
+    -- 3. Esp Box Corner
+    if cfg.BoxCorner then
+        local l = math.max(4, math.min(width, height) * 0.28)
+        local c = obj.Corners
+        -- topo esquerdo
+        setLine(c[1], x1, y1, x1 + l, y1, color)
+        setLine(c[2], x1, y1, x1, y1 + l, color)
+        -- topo direito
+        setLine(c[3], x2, y1, x2 - l, y1, color)
+        setLine(c[4], x2, y1, x2, y1 + l, color)
+        -- base esquerda
+        setLine(c[5], x1, y2, x1 + l, y2, color)
+        setLine(c[6], x1, y2, x1, y2 - l, color)
+        -- base direita
+        setLine(c[7], x2, y2, x2 - l, y2, color)
+        setLine(c[8], x2, y2, x2, y2 - l, color)
+    else
+        for _, line in ipairs(obj.Corners) do
+            line.Visible = false
+        end
+    end
+end
+
+connect(RunService.RenderStepped, function()
+    Camera = Workspace.CurrentCamera
+    if not Camera then
+        return
+    end
+
+    local cfg = State.ESP
+    local anyOn = cfg.Name or cfg.Health or cfg.BoxCorner
+
+    if anyOn then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                local obj = ESPObjects[plr] or createESP(plr)
+                if obj then
+                    pcall(updateESP, plr, obj, cfg)
+                end
             end
         end
-        local kc = toKeyCode(data.PickKey)
-        if kc then
-            State.PickKey = kc
-        end
-
-        -- "Dark" era o tema padrão antigo: passa pro Demon Slayer
-        if State.Theme == "Dark" then
-            State.Theme = "Demon Slayer"
-        end
-    end)
-end
-
-loadConfig()
-
--- ═══════════════════════════════════════════════════════════
---  7. ROLES (MM2) - detecção antecipada
---  1) Dados do jogo (GetPlayerData / PlayerDataChanged)
---  2) Plano B: Knife / Gun
--- ═══════════════════════════════════════════════════════════
-local roleData = {}
-local deadData = {}
-local getPlayerDataRemote = nil
-
-local function hasTool(player, toolName)
-    local char = player.Character
-    if char and char:FindFirstChild(toolName) then
-        return true
-    end
-    local backpack = player:FindFirstChild("Backpack")
-    return backpack ~= nil and backpack:FindFirstChild(toolName) ~= nil
-end
-
-local function normalizeRole(r)
-    if r == "Murderer" then
-        return "Murderer"
-    elseif r == "Sheriff" or r == "Hero" then
-        return "Sheriff"
-    elseif r == "Innocent" then
-        return "Innocent"
-    end
-    return nil
-end
-
-local function readRoles(data)
-    local out = {}
-    if type(data) ~= "table" then return out end
-    for name, info in pairs(data) do
-        if type(name) == "string" and type(info) == "table" then
-            local r = normalizeRole(info.Role)
-            if r then out[name] = r end
-        end
-    end
-    return out
-end
-
-local function readDead(data)
-    local out = {}
-    if type(data) ~= "table" then return out end
-    for name, info in pairs(data) do
-        if type(name) == "string" and type(info) == "table" then
-            out[name] = (info.Dead == true)
-        end
-    end
-    return out
-end
-
-local function replaceRoleData(data)
-    roleData = readRoles(data)
-    deadData = readDead(data)
-end
-
-local function mergeRoleData(data)
-    for name, r in pairs(readRoles(data)) do roleData[name] = r end
-    for name, d in pairs(readDead(data)) do deadData[name] = d end
-end
-
--- Cache curto para não repetir a mesma busca várias vezes por frame
-local roleCacheV = setmetatable({}, { __mode = "k" })
-local roleCacheT = setmetatable({}, { __mode = "k" })
-
-local function getRole(player)
-    local now = os.clock()
-    local t = roleCacheT[player]
-    if t and now - t < Perf.roleStep then
-        return roleCacheV[player]
-    end
-
-    local result
-    local r = roleData[player.Name]
-    if r and r ~= "Innocent" then
-        result = r
-    elseif hasTool(player, "Knife") then
-        result = "Murderer"
-    elseif hasTool(player, "Gun") then
-        result = "Sheriff"
     else
-        result = r or "Innocent"
-    end
-
-    roleCacheV[player] = result
-    roleCacheT[player] = now
-    return result
-end
-
-local function rolesNeeded()
-    return State.RoleInnocent or State.RoleSheriff or State.RoleMurderer
-end
-
-local function roleDataNeeded()
-    return rolesNeeded()
-        or State.ArrowMurder or State.ArrowSheriff
-        or State.MagicBullet or State.WallShot
-        or State.FarmOn
-        or (State.Fling and type(State.FlingTarget) == "string" and State.FlingTarget:sub(1, 1) == "[")
-end
-
--- Liga nos remotes do jogo (em segundo plano)
-task.spawn(function()
-    local remotes = ReplicatedStorage:WaitForChild("Remotes", 15)
-    if not remotes or not alive then return end
-
-    local extras   = remotes:WaitForChild("Extras", 5)
-    local gameplay = remotes:WaitForChild("Gameplay", 5)
-    if not alive then return end
-
-    local getter = extras and extras:FindFirstChild("GetPlayerData")
-    if getter and getter:IsA("RemoteFunction") then
-        getPlayerDataRemote = getter
-    end
-
-    local changed = gameplay and gameplay:FindFirstChild("PlayerDataChanged")
-    if changed and changed:IsA("RemoteEvent") then
-        track(changed.OnClientEvent:Connect(function(data)
-            pcall(mergeRoleData, data)
-        end))
+        for _, obj in pairs(ESPObjects) do
+            hideESP(obj)
+        end
     end
 end)
 
--- Consulta os roles 2x por segundo (só quando algum recurso precisa)
-do
-    local invoking    = false
-    local invokeToken = 0
-
-    loop("roles", 0.5, function()
-        if invoking or not getPlayerDataRemote or not roleDataNeeded() then
-            return
-        end
-
-        invoking = true
-        invokeToken = invokeToken + 1
-        local myToken = invokeToken
-
-        task.spawn(function()
-            local ok, data = pcall(function()
-                return getPlayerDataRemote:InvokeServer()
-            end)
-            if invokeToken == myToken then
-                invoking = false
-            end
-            if ok and type(data) == "table" then
-                replaceRoleData(data)
-            end
-        end)
-
-        -- tempo limite: se o servidor não responder, libera a próxima consulta
-        task.delay(3, function()
-            if invokeToken == myToken then
-                invoking = false
-            end
-        end)
-    end)
-end
-
--- ═══════════════════════════════════════════════════════════
---  8. ARMA DROPADA (busca compartilhada + ESP)
--- ═══════════════════════════════════════════════════════════
--- Etiqueta flutuante bonita (pílula escura com borda colorida)
-local function makePillTag(tagName, offsetY, accent)
-    local gui = Instance.new("BillboardGui")
-    gui.Name = tagName
-    gui.AlwaysOnTop = true
-    gui.Size = UDim2.fromOffset(240, 30)
-    gui.StudsOffset = Vector3.new(0, offsetY, 0)
-    gui.Parent = HighlightFolder
-
-    local pill = Instance.new("Frame")
-    pill.AnchorPoint = Vector2.new(0.5, 0.5)
-    pill.Position = UDim2.fromScale(0.5, 0.5)
-    pill.Size = UDim2.fromOffset(0, 22)
-    pill.AutomaticSize = Enum.AutomaticSize.X
-    pill.BackgroundColor3 = Color3.fromRGB(12, 10, 14)
-    pill.BackgroundTransparency = 0.2
-    pill.BorderSizePixel = 0
-    pill.Parent = gui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 11)
-    corner.Parent = pill
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = accent
-    stroke.Thickness = 1.5
-    stroke.Transparency = 0.1
-    stroke.Parent = pill
-
-    local pad = Instance.new("UIPadding")
-    pad.PaddingLeft = UDim.new(0, 10)
-    pad.PaddingRight = UDim.new(0, 10)
-    pad.Parent = pill
-
-    local label = Instance.new("TextLabel")
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.fromOffset(0, 22)
-    label.AutomaticSize = Enum.AutomaticSize.X
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 13
-    label.TextColor3 = WHITE
-    label.RichText = true
-    label.Text = ""
-    label.Parent = pill
-
-    return gui, label, stroke
-end
-
-local gunCache  = nil
-local gunScanAt = 0
-
-local function findGunDrop(forceDeep)
-    if gunCache and gunCache.Parent and gunCache:IsDescendantOf(Workspace) then
-        return gunCache
-    end
-
-    gunCache = Workspace:FindFirstChild("GunDrop")
-    if not gunCache then
-        local now = os.clock()
-        if forceDeep or now - gunScanAt >= 1 then
-            gunScanAt = now
-            gunCache = Workspace:FindFirstChild("GunDrop", true)
-        end
-    end
-    return gunCache
-end
-
-local function getGunPart(drop)
-    if drop:IsA("BasePart") then
-        return drop
-    end
-    if drop:IsA("Model") and drop.PrimaryPart then
-        return drop.PrimaryPart
-    end
-    return drop:FindFirstChildWhichIsA("BasePart", true)
-end
-
-local gunHighlight = nil
-local gunBillboard = nil
-local gunLabel     = nil
-local gunLastText  = nil
-
-local function hideGunDrop()
-    if gunHighlight then gunHighlight.Enabled = false end
-    if gunBillboard then gunBillboard.Enabled = false end
-end
-
-local function updateGunDrop()
-    if not State.GunDrop then
-        hideGunDrop()
-        return
-    end
-
-    local drop = findGunDrop(false)
-    local part = drop and getGunPart(drop)
-    if not part then
-        hideGunDrop()
-        return
-    end
-
-    if not gunHighlight or gunHighlight.Parent ~= HighlightFolder then
-        gunHighlight = Instance.new("Highlight")
-        gunHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        gunHighlight.FillColor = GUN_COLOR
-        gunHighlight.OutlineColor = GUN_COLOR
-        gunHighlight.FillTransparency = 0.35
-        gunHighlight.OutlineTransparency = 0
-        gunHighlight.Parent = HighlightFolder
-    end
-    if gunHighlight.Adornee ~= drop then
-        gunHighlight.Adornee = drop
-    end
-    gunHighlight.Enabled = true
-
-    if not gunBillboard or gunBillboard.Parent ~= HighlightFolder then
-        gunBillboard, gunLabel = makePillTag("GunDropTag", 2.5, GUN_COLOR)
-        gunLabel.TextColor3 = GUN_COLOR
-        gunLastText = nil
-    end
-    if gunBillboard.Adornee ~= part then
-        gunBillboard.Adornee = part
-    end
-    gunBillboard.Enabled = true
-
-    local dist = (Camera.CFrame.Position - part.Position).Magnitude
-    local text = string.format("Gun Dropped [%d]", math.floor(dist))
-    if text ~= gunLastText then
-        gunLastText = text
-        gunLabel.Text = text
-    end
-end
-
--- ═══════════════════════════════════════════════════════════
---  9. ESP DE ROLES (Chams)
--- ═══════════════════════════════════════════════════════════
-local roleHighlights = {} -- [player] = Highlight
-local ROLE_KEYS = { Innocent = "RoleInnocent", Sheriff = "RoleSheriff", Murderer = "RoleMurderer" }
-
-local nameTags = {} -- [player] = { gui, label, text }
-
-local function removePlayer(player)
-    local rh = roleHighlights[player]
-    if rh then
-        pcall(function() rh:Destroy() end)
-        roleHighlights[player] = nil
-    end
-
-    local t = nameTags[player]
-    if t then
-        pcall(function() t.gui:Destroy() end)
-        nameTags[player] = nil
-    end
-end
-
--- Esp Name: cartão com bolinha (cor do role), nome e distância.
--- Fica bem ACIMA da cabeça: sobe NAME_STUDS_UP studs e ainda ganha uma folga fixa
--- em pixels (NAME_GAP_PX), então não cola na cabeça nem de perto nem de longe.
--- (a borda e a bolinha ganham a cor do role só se o ESP desse role estiver ligado)
-local NAME_STUDS_UP = 2.6
-local NAME_GAP_PX   = 8
-local NAME_H        = 28
-
-local function makeNameTag(accent)
-    local gui = Instance.new("BillboardGui")
-    gui.Name = "NameTag"
-    gui.AlwaysOnTop = true
-    gui.Size = UDim2.fromOffset(300, 100)
-    gui.StudsOffset = Vector3.new(0, NAME_STUDS_UP, 0)
-    gui.Parent = HighlightFolder
-
-    -- o cartão nasce com a base um pouco acima do centro do billboard e cresce pra cima
-    local card = Instance.new("Frame")
-    card.AnchorPoint = Vector2.new(0.5, 1)
-    card.Position = UDim2.new(0.5, 0, 0.5, -NAME_GAP_PX)
-    card.Size = UDim2.fromOffset(0, NAME_H)
-    card.AutomaticSize = Enum.AutomaticSize.X
-    card.BackgroundColor3 = Color3.fromRGB(14, 14, 20)
-    card.BackgroundTransparency = 0.12
-    card.BorderSizePixel = 0
-    card.Parent = gui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, NAME_H / 2)
-    corner.Parent = card
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = accent
-    stroke.Thickness = 1.5
-    stroke.Transparency = 0.15
-    stroke.Parent = card
-
-    local pad = Instance.new("UIPadding")
-    pad.PaddingLeft = UDim.new(0, 11)
-    pad.PaddingRight = UDim.new(0, 13)
-    pad.Parent = card
-
-    local list = Instance.new("UIListLayout")
-    list.FillDirection = Enum.FillDirection.Horizontal
-    list.VerticalAlignment = Enum.VerticalAlignment.Center
-    list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Padding = UDim.new(0, 7)
-    list.Parent = card
-
-    local dot = Instance.new("Frame")
-    dot.LayoutOrder = 1
-    dot.Size = UDim2.fromOffset(8, 8)
-    dot.BackgroundColor3 = accent
-    dot.BorderSizePixel = 0
-    dot.Parent = card
-
-    local dotCorner = Instance.new("UICorner")
-    dotCorner.CornerRadius = UDim.new(1, 0)
-    dotCorner.Parent = dot
-
-    local label = Instance.new("TextLabel")
-    label.LayoutOrder = 2
-    label.BackgroundTransparency = 1
-    label.Size = UDim2.fromOffset(0, NAME_H)
-    label.AutomaticSize = Enum.AutomaticSize.X
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 14
-    label.TextColor3 = WHITE
-    label.RichText = true
-    label.Text = ""
-    label.Parent = card
-
-    return gui, label, stroke, dot
-end
-
-local function updateNameTag(player, char, show, role, dist)
-    local t = nameTags[player]
-
-    local head = show and char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
-    if not head then
-        if t and t.gui.Enabled then t.gui.Enabled = false end
-        return
-    end
-
-    if not t or t.gui.Parent ~= HighlightFolder then
-        if t then
-            pcall(function() t.gui:Destroy() end)
-        end
-        local gui, label, stroke, dot = makeNameTag(NAME_NEUTRAL)
-        t = { gui = gui, label = label, stroke = stroke, dot = dot, text = nil, color = NAME_NEUTRAL }
-        nameTags[player] = t
-    end
-
-    if t.gui.Adornee ~= head then
-        t.gui.Adornee = head
-    end
-
-    local color = (role and ROLE_COLORS[role]) or NAME_NEUTRAL
-    if t.color ~= color then
-        t.color = color
-        t.stroke.Color = color
-        t.dot.BackgroundColor3 = color
-    end
-
-    local nm = player.DisplayName
-    if nm == nil or nm == "" then
-        nm = player.Name
-    end
-    nm = nm:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
-
-    local text = string.format('%s  <font color="#9ca3c0" size="12">%dm</font>', nm, math.floor(dist or 0))
-    if text ~= t.text then
-        t.text = text
-        t.label.Text = text
-    end
-    if not t.gui.Enabled then
-        t.gui.Enabled = true
-    end
-end
-
-local function updateRoleHighlight(player, char, role)
-    local h = roleHighlights[player]
-
-    if not role or not char then
-        if h and h.Enabled then h.Enabled = false end
-        return
-    end
-
-    if not h or h.Parent ~= HighlightFolder then
-        h = Instance.new("Highlight")
-        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        h.FillTransparency = 0.6
-        h.OutlineTransparency = 0
-        h.Parent = HighlightFolder
-        roleHighlights[player] = h
-    end
-
-    if h.Adornee ~= char then
-        h.Adornee = char
-    end
-    local color = ROLE_COLORS[role]
-    if h.FillColor ~= color then
-        h.FillColor = color
-        h.OutlineColor = color
-    end
-    if not h.Enabled then h.Enabled = true end
-end
-
-local function anyEspEnabled()
-    return rolesNeeded() or State.GunDrop or State.EspName
-end
-
-local function stepPlayer(player, limit, camPos, needRoles)
-    local char = player.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-
-    local dist = nil
-    if hum and root and hum.Health > 0 then
-        dist = (camPos - root.Position).Magnitude
-    end
-    local inRange = dist ~= nil and dist <= limit
-
-    local chamRole = nil
-    if needRoles and inRange then
-        local r = getRole(player)
-        if State[ROLE_KEYS[r]] == true then
-            chamRole = r
-        end
-    end
-    updateRoleHighlight(player, char, chamRole)
-
-    updateNameTag(player, char, State.EspName and inRange, chamRole, dist)
-end
-
-local function hideEverything()
-    for _, h in pairs(roleHighlights) do
-        h.Enabled = false
-    end
-    for _, t in pairs(nameTags) do
-        t.gui.Enabled = false
-    end
-    hideGunDrop()
-end
-
-do
-    local active = false
-    local accum  = 0
-
-    track(RunService.RenderStepped:Connect(function(dt)
-        Camera = Workspace.CurrentCamera
-        if not Camera then return end
-
-        if not anyEspEnabled() then
-            if active then
-                active = false
-                hideEverything()
-            end
-            return
-        end
-        active = true
-
-        -- limita a taxa de atualização do ESP
-        local stepT = Perf.espStep
-        if stepT > 0 then
-            accum = accum + dt
-            if accum < stepT - 0.002 then return end
-            accum = 0
-        end
-
-        local needRoles = rolesNeeded()
-        local camPos    = Camera.CFrame.Position
-
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                local ok, err = pcall(stepPlayer, player, ESP_MAX_DIST, camPos, needRoles)
-                if not ok then safeWarn(err, "esp") end
-            end
-        end
-
-        local okGun, errGun = pcall(updateGunDrop)
-        if not okGun then safeWarn(errGun, "gundrop") end
-    end))
-end
-
-track(Players.PlayerRemoving:Connect(removePlayer))
-
--- ═══════════════════════════════════════════════════════════
---  10. WEAPON - Pegar Arma Dropada (sem sair da posição)
---  1) toque remoto (firetouchinterest) -> não move o personagem
---  2) plano B: vai até a arma e VOLTA na hora pro mesmo lugar
--- ═══════════════════════════════════════════════════════════
-local pickBusy = false
-
-local function gunGone(target)
-    return hasTool(LocalPlayer, "Gun") or not target:IsDescendantOf(Workspace)
-end
-
-local function waitGunGone(target, timeout)
-    local t0 = os.clock()
-    while os.clock() - t0 < timeout do
-        if gunGone(target) then
-            return true
-        end
-        task.wait(0.05)
-    end
-    return gunGone(target)
-end
-
--- Retorna: ok (bool) e o motivo ("dead" | "nogun" | "hasgun" | "busy" | "fail")
-local function pickGun(forceDeep)
-    if pickBusy then
-        return false, "busy"
-    end
-
+connect(Players.PlayerRemoving, removeESP)
+
+----------------------------------------------------------------
+-- Player (CFrame)
+----------------------------------------------------------------
+connect(RunService.Heartbeat, function(dt)
     local char = LocalPlayer.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not (hum and root and hum.Health > 0) then
-        return false, "dead"
-    end
-    if hasTool(LocalPlayer, "Gun") then
-        return false, "hasgun"
+    local cam = Workspace.CurrentCamera
+    if not (hum and root and cam) or hum.Health <= 0 then
+        return
     end
 
-    local drop = findGunDrop(forceDeep)
-    if not drop then
-        return false, "nogun"
-    end
-    local target = getGunPart(drop)
-    if not target then
-        return false, "nogun"
-    end
-
-    pickBusy = true
-
-    -- Tudo protegido: pickBusy SEMPRE volta a false, mesmo se der erro
-    local okRun, got = pcall(function()
-        local success = false
-
-        -- 1) Toque remoto
-        if firetouchinterest then
-            pcall(function()
-                firetouchinterest(root, target, 0)
-                task.wait()
-                firetouchinterest(root, target, 1)
-            end)
-            success = waitGunGone(target, 0.4)
+    if State.CFrameSpeed then
+        if hum.MoveDirection.Magnitude > 0 then
+            root.CFrame += hum.MoveDirection * (State.SpeedValue * dt)
         end
-
-        -- 2) Plano B: vai e volta
-        if not success then
-            local origin = root.CFrame
-            pcall(function()
-                root.CFrame = target.CFrame
-                if firetouchinterest then
-                    firetouchinterest(root, target, 0)
-                    firetouchinterest(root, target, 1)
-                end
-            end)
-            success = waitGunGone(target, 0.5)
-            pcall(function()
-                if root.Parent then
-                    root.CFrame = origin
-                    root.AssemblyLinearVelocity = Vector3.zero
-                end
-            end)
-        end
-
-        return success
-    end)
-
-    pickBusy = false
-
-    if okRun and got then
-        return true
     end
-    return false, "fail"
-end
+end)
 
--- ───────── Botão quadrado com ícone (Mobile) ─────────
-local PICK_SIZE   = 62
-local PICK_PRESS  = 54
-local PickGui = newScreenGui("BukPickGui", 100)
-
-local PickBtn = Instance.new("TextButton")
-PickBtn.Name = "PickButton"
-PickBtn.AnchorPoint = Vector2.new(0.5, 0.5)
-PickBtn.Position = UDim2.new(0.92, 0, 0.45, 0)
-PickBtn.Size = UDim2.fromOffset(PICK_SIZE, PICK_SIZE)
-PickBtn.BackgroundColor3 = WHITE
-PickBtn.BackgroundTransparency = 0.08
-PickBtn.AutoButtonColor = false
-PickBtn.Text = ""
-PickBtn.Visible = false
-PickBtn.Parent = PickGui
-
-local PickStroke = Instance.new("UIStroke")
-do
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 16)
-    corner.Parent = PickBtn
-
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new(Color3.fromRGB(58, 24, 28), Color3.fromRGB(12, 10, 12))
-    gradient.Rotation = 90
-    gradient.Parent = PickBtn
-
-    PickStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    PickStroke.Color = ACCENT
-    PickStroke.Thickness = 2
-    PickStroke.Transparency = 0.1
-    PickStroke.Parent = PickBtn
-end
-
-local PickIcon = Instance.new("TextLabel")
-PickIcon.BackgroundTransparency = 1
-PickIcon.Position = UDim2.new(0, 0, 0, 5)
-PickIcon.Size = UDim2.new(1, 0, 0, 36)
-PickIcon.ZIndex = 2
-PickIcon.Font = Enum.Font.GothamBold
-PickIcon.TextSize = 28
-PickIcon.TextColor3 = WHITE
-PickIcon.Text = "🔫"
-PickIcon.Parent = PickBtn
-
-local PICK_LABEL_COLOR = Color3.fromRGB(200, 205, 225)
-
-local PickLabel = Instance.new("TextLabel")
-PickLabel.BackgroundTransparency = 1
-PickLabel.Position = UDim2.new(0, 0, 1, -20)
-PickLabel.Size = UDim2.new(1, 0, 0, 16)
-PickLabel.ZIndex = 2
-PickLabel.Font = Enum.Font.GothamBold
-PickLabel.TextSize = 10
-PickLabel.TextColor3 = PICK_LABEL_COLOR
-PickLabel.Text = L("pick_cap")
-PickLabel.Parent = PickBtn
-
-local function refreshPickButton()
-    PickLabel.Text = L("pick_cap")
-end
-
-local function setPickButtonVisible(v)
-    PickBtn.Visible = v and true or false
-end
-
-local function tweenPickSize(px)
-    pcall(function()
-        TweenService:Create(PickBtn, TweenInfo.new(0.08), { Size = UDim2.fromOffset(px, px) }):Play()
-    end)
-end
-
-local flashToken = 0
-local function flashPick(text, color)
-    flashToken = flashToken + 1
-    local mine = flashToken
-    PickLabel.Text = text
-    PickLabel.TextColor3 = color
-    PickStroke.Color = color
-    task.delay(1, function()
-        if mine == flashToken and PickBtn.Parent then
-            PickLabel.Text = L("pick_cap")
-            PickLabel.TextColor3 = PICK_LABEL_COLOR
-            PickStroke.Color = ACCENT
-        end
-    end)
-end
-
-local PICK_FAIL_KEYS = {
-    nogun  = { "pick_nogun",  "flash_nogun"  },
-    dead   = { "pick_dead",   "flash_dead"   },
-    hasgun = { "pick_hasgun", "flash_hasgun" },
-    fail   = { "pick_fail",   "flash_fail"   },
+----------------------------------------------------------------
+-- Lock On (botão flutuante)
+----------------------------------------------------------------
+local LockOn = {
+    Enabled = false, -- toggle da aba Painel (mostra o botão flutuante)
+    Active = false, -- lock ativo (botão apertado)
+    Target = nil, -- Player travado
+    ButtonLocked = false, -- impede arrastar o botão
+    PartName = "HumanoidRootPart",
+    MaxDistance = 300,
+    AutoSwitch = false, -- quando o alvo morre/sai/fica longe, pula sozinho pro próximo mais perto
+    List = nil, -- lista de alvos (do mais perto pro mais longe) que o Trocar Alvo está percorrendo
 }
 
--- Pegar manualmente (botão da tela e atalho de teclado usam a mesma função)
-local function manualPick()
-    local ok, reason = pickGun(true)
-    if reason == "busy" then return end
+local LockGui, LockButton
+local BUTTON_SIZE = 64
+local DRAG_THRESHOLD = 8 -- pixels que o dedo precisa mover para contar como arraste
 
-    if ok then
-        notify(L("pick_ok"), "check")
-        flashPick(L("flash_ok"), ROLE_COLORS.Innocent)
+local function getTargetPart(plr)
+    local char = plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then
+        return nil
+    end
+    return char:FindFirstChild(LockOn.PartName) or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getOrigin()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root then
+        return root.Position
+    end
+    local cam = Workspace.CurrentCamera
+    return cam and cam.CFrame.Position or Vector3.zero
+end
+
+local function findNearestTarget()
+    local origin = getOrigin()
+    local best, bestDist = nil, LockOn.MaxDistance
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local part = getTargetPart(plr)
+            if part then
+                local d = (part.Position - origin).Magnitude
+                if d <= bestDist then
+                    best, bestDist = plr, d
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function refreshLockButton()
+    if not LockButton then
+        return
+    end
+    local stroke = LockButton:FindFirstChildOfClass("UIStroke")
+    if LockOn.Active then
+        LockButton.Text = "LOCK\nON"
+        LockButton.BackgroundColor3 = Color3.fromRGB(24, 60, 38)
+        if stroke then
+            stroke.Color = Color3.fromRGB(70, 255, 110)
+        end
     else
-        local keys = PICK_FAIL_KEYS[reason] or PICK_FAIL_KEYS.fail
-        notify(L(keys[1]), "triangle-alert")
-        flashPick(L(keys[2]), ROLE_COLORS.Murderer)
+        LockButton.Text = "LOCK\nOFF"
+        LockButton.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
+        if stroke then
+            stroke.Color = Color3.fromRGB(255, 255, 255)
+        end
     end
 end
 
--- Arrastar move o botão (sem sair da tela), tocar sem arrastar pega a arma
-do
-    local dragging    = false
-    local moved       = false
-    local dragInput   = nil
-    local dragStart   = nil
-    local startCenter = nil
-
-    PickBtn.InputBegan:Connect(function(input)
-        local t = input.UserInputType
-        if t ~= Enum.UserInputType.Touch and t ~= Enum.UserInputType.MouseButton1 then
-            return
+local function setLockActive(active)
+    LockOn.List = nil -- trava nova (ou desligada): o Trocar Alvo monta uma lista nova
+    if active then
+        local target = findNearestTarget()
+        if target then
+            LockOn.Target = target
+            LockOn.Active = true
+        else
+            LockOn.Target = nil
+            LockOn.Active = false
+            WindUI:Notify({
+                Title = "Lock On",
+                Content = "Nenhum player por perto.",
+                Duration = 2,
+            })
         end
+    else
+        LockOn.Target = nil
+        LockOn.Active = false
+    end
+    refreshLockButton()
+end
 
-        dragging    = true
-        moved       = false
-        dragInput   = input
-        dragStart   = input.Position
-        startCenter = PickBtn.AbsolutePosition + PickBtn.AbsoluteSize / 2
-        tweenPickSize(PICK_PRESS)
+-- Esse player ainda dá pra travar? (vivo, no jogo e dentro da distância máxima)
+local function isTargetable(plr)
+    if plr == LocalPlayer then
+        return false
+    end
+    local part = getTargetPart(plr)
+    return part ~= nil and (part.Position - getOrigin()).Magnitude <= LockOn.MaxDistance
+end
 
-        local conn
-        conn = input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                conn:Disconnect()
-                dragging = false
-                tweenPickSize(PICK_SIZE)
-                if not moved then
-                    task.spawn(manualPick)
-                end
-            end
-        end)
+-- Todo mundo que dá pra travar agora, do mais perto pro mais longe
+local function buildTargetList()
+    local origin = getOrigin()
+    local entries = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if isTargetable(plr) then
+            table.insert(entries, { plr = plr, dist = (getTargetPart(plr).Position - origin).Magnitude })
+        end
+    end
+    table.sort(entries, function(a, b)
+        return a.dist < b.dist
     end)
 
-    track(UserInputService.InputChanged:Connect(function(input)
-        if not dragging or not dragInput then return end
-
-        if dragInput.UserInputType == Enum.UserInputType.Touch then
-            if input ~= dragInput then return end
-        elseif input.UserInputType ~= Enum.UserInputType.MouseMovement then
-            return
-        end
-
-        local delta = input.Position - dragStart
-        if delta.Magnitude > 10 then
-            moved = true
-        end
-        if moved then
-            local cam  = Workspace.CurrentCamera
-            local vp   = cam and cam.ViewportSize or Vector2.new(1280, 720)
-            local half = Vector2.new(PICK_SIZE, PICK_SIZE) / 2
-            local nx = math.clamp(startCenter.X + delta.X, half.X, vp.X - half.X)
-            local ny = math.clamp(startCenter.Y + delta.Y, half.Y, vp.Y - half.Y)
-            PickBtn.Position = UDim2.fromOffset(nx, ny)
-        end
-    end))
+    local list = {}
+    for i, entry in ipairs(entries) do
+        list[i] = entry.plr
+    end
+    return list
 end
 
--- Atalho de teclado (PC)
-track(UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if State.PickKeyOn and State.PickKey and input.KeyCode == State.PickKey then
-        task.spawn(manualPick)
+-- Primeiro da lista, depois do alvo atual, que ainda dá pra travar
+local function nextInList(list, current)
+    for i = (table.find(list, current) or 0) + 1, #list do
+        if list[i] ~= current and isTargetable(list[i]) then
+            return list[i]
+        end
     end
-end))
-
--- Automático: pega assim que a arma cair
-do
-    local tries = setmetatable({}, { __mode = "k" })
-
-    loop("autopick", 0.2, function()
-        if not State.PickAuto or pickBusy or hasTool(LocalPlayer, "Gun") then
-            return
-        end
-
-        local drop = findGunDrop(false)
-        if drop and (tries[drop] or 0) < 4 then
-            local ok, reason = pickGun(false)
-            if ok then
-                notify(L("pick_auto_ok"), "check")
-            elseif reason == "fail" then
-                tries[drop] = (tries[drop] or 0) + 1
-                task.wait(1)
-            end
-        end
-    end)
+    return nil
 end
 
--- ═══════════════════════════════════════════════════════════
---  11. AUTO FARM DE MOEDAS (MM2)
---  - SÓ funciona dentro da partida (vivo, com role definido e mapa/moedas no jogo)
---  - Underground Farm (padrão): você anda por BAIXO do mapa, sobe só no instante
---    de pegar a moeda e já desce de novo (nada de ficar voando por cima do mapa)
---  - Sem Underground: anda reto até a moeda (atravessa paredes)
---  - O movimento é feito frame a frame (sem Tween) e a posição fica travada:
---    sem tremedeira, sem cair no vazio e sem travar quando pausa ou desliga
---  - Modo Seguro: pausas aleatórias, sorteia entre as 3 moedas mais próximas e
---    espera parado se o murder chegar perto
---  - Moeda que não dá pra pegar é descartada após 3 tentativas
---  Obs.: nenhum script garante 100% contra detecção. Use com moderação.
--- ═══════════════════════════════════════════════════════════
-local FARM_DEPTH = 9 -- Underground: quantos studs abaixo da moeda você anda
-
-local Farm = {
-    container = nil,   -- pasta das moedas do mapa atual
-    visited   = {},    -- moedas já tocadas ou descartadas (não são alvo de novo)
-    pending   = {},    -- moedas tocadas que ainda não sumiram (o servidor pode demorar)
-    tries     = setmetatable({}, { __mode = "k" }),
-    count     = 0,     -- moedas pegas nesta partida
-    fullFor   = nil,   -- mapa em que a bolsa já encheu
-    scanAt    = 0,
-    idleAt    = nil,
-    matchOkAt = 0,
-    murderAt  = 0,
-    murderVal = false,
-    engaged   = false, -- true enquanto o script controla o seu personagem
-    under     = false, -- true quando você está embaixo do mapa
-    pos       = nil,   -- CFrame em que o personagem é mantido
-    rootRef   = nil,   -- HumanoidRootPart que está sendo controlado
-    safeCF    = nil,   -- último lugar seguro na superfície (pra voltar)
-}
-
--- Tem um murder (vivo) perto dessa posição?
-function Farm.murderNear(pos, radius)
-    local now = os.clock()
-    if now - Farm.murderAt < 0.2 then
-        return Farm.murderVal
+-- Passa a trava pro próximo player mais perto.
+-- A ordem (mais perto -> mais longe) é tirada uma vez e seguida até o fim, então todo mundo
+-- aparece antes de repetir, mesmo com os players se mexendo. No fim, tira a ordem de novo.
+local function switchLockTarget()
+    if not LockOn.Enabled then
+        notifyOnce("switch", "Trocar Alvo", "Ligue o Lock On primeiro.")
+        return
     end
-    Farm.murderAt  = now
-    Farm.murderVal = false
+    if not LockOn.Active then
+        setLockActive(true) -- ainda sem trava: trava no mais perto
+        return
+    end
 
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local c = p.Character
-            local r = c and c:FindFirstChild("HumanoidRootPart")
-            local h = c and c:FindFirstChildOfClass("Humanoid")
-            if r and h and h.Health > 0 and (r.Position - pos).Magnitude <= radius then
-                if getRole(p) == "Murderer" then
-                    Farm.murderVal = true
+    local current = LockOn.Target
+    local list = LockOn.List
+    local nextTarget = list and nextInList(list, current)
+
+    if not nextTarget then
+        -- fim da lista (ou ainda não tinha lista): tira uma lista nova
+        local fresh = buildTargetList()
+        LockOn.List = fresh
+        if not list then
+            nextTarget = nextInList(fresh, current) -- lista nova no meio do caminho: segue depois do atual
+        end
+        if not nextTarget then
+            -- recomeça a rodada pelo mais perto (que não seja o atual)
+            for _, plr in ipairs(fresh) do
+                if plr ~= current then
+                    nextTarget = plr
                     break
                 end
             end
         end
     end
-    return Farm.murderVal
+
+    if nextTarget then
+        LockOn.Target = nextTarget
+    else
+        notifyOnce("switch", "Trocar Alvo", "Não tem outro player por perto.")
+    end
 end
 
--- Você está DENTRO da partida? (vivo, participando da rodada e fora do vazio/limbo)
--- Fora disso o Auto Farm para sozinho e volta quando você entrar numa partida de novo.
--- Os dados do jogo podem oscilar por um instante, então existe uma tolerância de 2s
--- (menos quando você morre: aí para na hora).
-function Farm.inMatch()
-    local char = LocalPlayer.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not (hum and root and hum.Health > 0) then
-        Farm.matchOkAt = 0
-        return false -- morreu / sem personagem
+-- Coloca uma ScreenGui na tela: gethui/CoreGui (se o executor permitir), senão PlayerGui
+local function mountGui(gui)
+    local ok = pcall(function()
+        gui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+    end)
+    if not ok or not gui.Parent then
+        gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
-
-    local ok = true
-    if deadData[LocalPlayer.Name] then
-        ok = false -- o jogo marcou você como morto na rodada
-    elseif getPlayerDataRemote and roleData[LocalPlayer.Name] == nil then
-        ok = false -- sem role = está no lobby / não entrou na rodada
-    elseif root.Position.Y <= Workspace.FallenPartsDestroyHeight + 50 then
-        ok = false -- caiu no vazio / limbo
-    end
-
-    local now = os.clock()
-    if ok then
-        Farm.matchOkAt = now
-        return true
-    end
-    return Farm.matchOkAt > 0 and now - Farm.matchOkAt < 2
 end
 
-function Farm.findContainer()
-    if Farm.container and Farm.container:IsDescendantOf(Workspace) then
-        return Farm.container
-    end
-    local now = os.clock()
-    if now - Farm.scanAt < 1 then
-        return nil
-    end
-    Farm.scanAt = now
-    return Workspace:FindFirstChild("CoinContainer", true)
-end
+-- Deixa um objeto arrastável (toque ou mouse). Só um toque (sem arrastar) = onClick, se tiver.
+-- Com "Travar Botão" ligado nada arrasta e todo toque conta como clique.
+local function makeDraggable(gui, obj, onClick)
+    local pressInput, dragStart, startPos, moved
 
--- A moeda já foi coletada? (sumiu, perdeu o CoinVisual ou ele ficou invisível)
-function Farm.isCollected(coin)
-    if not coin.Parent then
-        return true
-    end
-    local v = coin:FindFirstChild("CoinVisual")
-    if not v then
-        return true
-    end
-    if v:IsA("BasePart") and v.Transparency >= 0.95 then
-        return true
-    end
-    return false
-end
-
-function Farm.coinAvailable(coin)
-    return coin:IsA("BasePart")
-        and not Farm.visited[coin]
-        and not Farm.isCollected(coin)
-end
-
-function Farm.pickCoin(container, from)
-    local list = {}
-    for _, c in ipairs(container:GetChildren()) do
-        if Farm.coinAvailable(c) then
-            list[#list + 1] = { coin = c, dist = (c.Position - from).Magnitude }
+    obj.InputBegan:Connect(function(input)
+        local t = input.UserInputType
+        if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then
+            return
         end
-    end
-    if #list == 0 then
-        return nil
-    end
+        if pressInput then
+            return
+        end
 
-    table.sort(list, function(a, b)
-        return a.dist < b.dist
+        pressInput = input
+        dragStart = input.Position
+        startPos = obj.Position
+        moved = false
+
+        local conn
+        conn = input.Changed:Connect(function()
+            if input.UserInputState ~= Enum.UserInputState.End then
+                return
+            end
+            conn:Disconnect()
+            if pressInput ~= input then
+                return
+            end
+            pressInput = nil
+            if onClick and (LockOn.ButtonLocked or not moved) then
+                onClick()
+            end
+        end)
     end)
 
-    local idx = 1
-    if State.FarmSafe then
-        idx = math.random(1, math.min(3, #list))
-    end
-    return list[idx].coin
+    connect(UserInputService.InputChanged, function(input)
+        if not pressInput then
+            return
+        end
+        local t = input.UserInputType
+        local isMove = t == Enum.UserInputType.MouseMovement
+            or (t == Enum.UserInputType.Touch and input == pressInput)
+        if not isMove then
+            return
+        end
+
+        local delta = input.Position - dragStart
+        if delta.Magnitude >= DRAG_THRESHOLD then
+            moved = true
+        end
+
+        if moved and not LockOn.ButtonLocked then
+            local size = gui.AbsoluteSize
+            local objSize = obj.AbsoluteSize
+            local x = math.clamp(startPos.X.Offset + delta.X, 0, math.max(size.X - objSize.X, 0))
+            local y = math.clamp(startPos.Y.Offset + delta.Y, 0, math.max(size.Y - objSize.Y, 0))
+            obj.Position = UDim2.fromOffset(x, y)
+        end
+    end)
 end
 
--- Coloca o personagem numa posição e trava ele lá (zera velocidade e giro).
--- 'dir' (opcional) faz o personagem olhar na direção do movimento.
-function Farm.setPos(root, p, dir)
-    local cf = nil
-    if dir then
-        local flat = Vector3.new(dir.X, 0, dir.Z)
-        if flat.Magnitude > 0.05 then
-            cf = CFrame.lookAt(p, p + flat)
-        end
-    end
-    if not cf then
-        local old = Farm.pos
-        cf = old and (CFrame.new(p) * (old - old.Position)) or CFrame.new(p)
-    end
-    Farm.pos = cf
-    root.CFrame = cf
-    root.AssemblyLinearVelocity  = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
+-- Cria um botão redondo flutuante e arrastável.
+-- Toque = onClick | Arrastar = move o botão (a menos que "Travar Botão" esteja ligado)
+local function createFloatingButton(name, text, posX, posY, onClick)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = name
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 999
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local btn = Instance.new("TextButton")
+    btn.Name = name .. "Button"
+    btn.Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE)
+    btn.Position = UDim2.fromOffset(posX, posY)
+    btn.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
+    btn.BackgroundTransparency = 0.15
+    btn.AutoButtonColor = false
+    btn.BorderSizePixel = 0
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Text = text
+    btn.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = btn
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = btn
+
+    mountGui(gui)
+    makeDraggable(gui, btn, onClick)
+
+    return gui, btn
 end
 
--- Solta o personagem. Se você estava embaixo do mapa, sobe de volta pra
--- superfície antes (só se o jogo não te levou pra outro lugar nesse meio tempo).
-function Farm.release()
-    local root, pos = Farm.rootRef, Farm.pos
-    if Farm.engaged and Farm.under and Farm.safeCF
-        and root and root.Parent and pos
-        and (root.Position - pos.Position).Magnitude < 20 then
-        root.CFrame = Farm.safeCF
-        root.AssemblyLinearVelocity  = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-    end
-    Farm.engaged = false
-    Farm.under   = false
-    Farm.pos     = nil
-    Farm.rootRef = nil
-end
-
--- Anda em linha reta até 'goal' (Vector3), frame a frame, na velocidade 'speed'.
--- Retorna: "arrived" | "murder" | "gone" | "timeout" | "stopped"
-function Farm.glide(root, hum, coin, goal, speed)
-    local t0      = os.clock()
-    local maxTime = (goal - Farm.pos.Position).Magnitude / speed + 3
-
-    while true do
-        if not (alive and State.FarmOn) or flingRunning then
-            return "stopped"
-        end
-        if not (root.Parent and hum.Parent and hum.Health > 0) then
-            return "stopped"
-        end
-        if not coin.Parent then
-            return "gone"
-        end
-        if not Farm.inMatch() then
-            return "stopped"
-        end
-        if State.FarmSafe and Farm.murderNear(Farm.pos.Position, 30) then
-            return "murder"
-        end
-        if os.clock() - t0 > maxTime then
-            return "timeout"
-        end
-
-        local dt = math.min(RunService.Heartbeat:Wait(), 0.1)
-        if not Farm.pos then
-            return "stopped" -- o Auto Farm foi solto enquanto esperava o frame
-        end
-        local from = Farm.pos.Position
-        local diff = goal - from
-        local dist = diff.Magnitude
-        local step = speed * dt
-        if dist <= step then
-            Farm.setPos(root, goal)
-            return "arrived"
-        end
-        Farm.setPos(root, from + diff / dist * step, diff)
-    end
-end
-
--- Espera a moeda sumir (foi coletada). Retorna true se coletou.
-function Farm.waitCollected(coin)
-    local t0 = os.clock()
-    while alive and State.FarmOn and not Farm.isCollected(coin) and os.clock() - t0 < 0.4 do
-        task.wait()
-    end
-    return Farm.isCollected(coin)
-end
-
--- Moedas que o servidor confirmou depois (sumiram com atraso) entram na contagem
-function Farm.sweepPending()
-    for coin in pairs(Farm.pending) do
-        if Farm.isCollected(coin) then
-            Farm.pending[coin] = nil
-            Farm.count = Farm.count + 1
-        end
-    end
-end
-
--- Mantém o personagem travado na posição enquanto o Auto Farm está no controle
--- (é isso que segura você embaixo do mapa nas pausas, sem cair)
-track(RunService.Heartbeat:Connect(function()
-    if not Farm.engaged then return end
-    local root = Farm.rootRef
-    if not (root and root.Parent and Farm.pos) then return end
-    root.CFrame = Farm.pos
-    root.AssemblyLinearVelocity  = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
-end))
-
--- Atravessa paredes e chão enquanto o Auto Farm está no controle (lista de peças em cache)
-do
-    local parts, partsAt, partsChar = {}, 0, nil
-
-    track(RunService.Stepped:Connect(function()
-        if not (State.FarmOn and Farm.engaged) then return end
-
-        local char = LocalPlayer.Character
-        if not char then return end
-
-        local now = os.clock()
-        if char ~= partsChar or now - partsAt > Perf.cacheRefresh then
-            partsChar, partsAt, parts = char, now, {}
-            for _, d in ipairs(char:GetDescendants()) do
-                if d:IsA("BasePart") then
-                    parts[#parts + 1] = d
-                end
-            end
-        end
-
-        for i = 1, #parts do
-            local part = parts[i]
-            if part.CanCollide and part.Parent then
-                part.CanCollide = false
-            end
-        end
-    end))
-end
-
-loop("farm", 0.03, function()
-    -- desligado / Fling ativo: solta o personagem
-    if not State.FarmOn or flingRunning then
-        if Farm.engaged then Farm.release() end
+local function createLockGui()
+    if LockGui then
         return
     end
+    local cam = Workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
 
-    -- Fora da partida (morreu, lobby, limbo...): não faz nada
-    if not Farm.inMatch() then
-        if Farm.engaged then Farm.release() end
-        return
-    end
-
-    local char = LocalPlayer.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    local container = Farm.findContainer()
-
-    -- Mapa novo = partida nova: zera o contador
-    if container ~= Farm.container then
-        Farm.release()
-        Farm.container = container
-        Farm.visited   = {}
-        Farm.pending   = {}
-        Farm.tries     = setmetatable({}, { __mode = "k" })
-        Farm.count     = 0
-        Farm.fullFor   = nil
-    end
-
-    if not (hum and root and hum.Health > 0 and container) or Farm.fullFor == container then
-        if Farm.engaged then Farm.release() end
-        return
-    end
-
-    -- Personagem novo (respawn): recomeça do zero
-    if Farm.engaged and Farm.rootRef ~= root then
-        Farm.engaged, Farm.under, Farm.pos, Farm.rootRef = false, false, nil, nil
-    end
-
-    Farm.sweepPending()
-
-    -- Bolsa cheia: sobe de volta, para até a próxima rodada (e reseta se pedido)
-    if Farm.count >= State.FarmLimit then
-        Farm.fullFor = container
-        Farm.release()
-        notify(L("farm_full"), "check")
-        if State.FarmReset then
-            hum.Health = 0
+    LockGui, LockButton = createFloatingButton(
+        "BukLockOn",
+        "LOCK\nOFF",
+        math.max(vp.X - BUTTON_SIZE - 240, 0),
+        math.max(vp.Y * 0.5 - BUTTON_SIZE / 2, 0),
+        function()
+            setLockActive(not LockOn.Active)
         end
-        return
-    end
+    )
+    refreshLockButton()
+end
 
-    -- Desligou o Underground com você embaixo do mapa: sobe de volta
-    if Farm.engaged and Farm.under and not State.FarmUnder then
-        Farm.release()
-    end
-
-    local from = (Farm.engaged and Farm.pos or root.CFrame).Position
-
-    -- Murder perto: espera. Embaixo do mapa fica travado onde está;
-    -- na superfície solta o personagem (ele volta pro chão).
-    if State.FarmSafe and Farm.murderNear(from, 30) then
-        if Farm.engaged and not Farm.under then
-            Farm.release()
+local function setLockEnabled(state)
+    LockOn.Enabled = state
+    if state then
+        createLockGui()
+        if LockGui then
+            LockGui.Enabled = true
         end
-        return
-    end
-
-    local coin = Farm.pickCoin(container, from)
-    if not coin then
-        -- sem moeda livre: sobe depois de 1s e, depois de 3s, tenta de novo as que não confirmaram
-        Farm.idleAt = Farm.idleAt or os.clock()
-        local idle = os.clock() - Farm.idleAt
-        if idle > 1 and Farm.engaged then
-            Farm.release()
-        end
-        if idle > 3 then
-            Farm.idleAt = nil
-            -- só libera de novo (1 tentativa extra) as moedas tocadas que não confirmaram;
-            -- as que já foram coletadas NUNCA voltam a ser alvo
-            for c in pairs(Farm.pending) do
-                if (Farm.tries[c] or 0) < 2 then
-                    Farm.visited[c] = nil
-                    Farm.pending[c] = nil
-                end
-            end
-        end
-        return
-    end
-    Farm.idleAt = nil
-
-    -- Assume o controle do personagem
-    if not Farm.engaged then
-        Farm.engaged = true
-        Farm.under   = false
-        Farm.rootRef = root
-        Farm.pos     = root.CFrame
-        Farm.safeCF  = root.CFrame
-    end
-
-    local coinPos = coin.Position
-    local speed   = math.max(State.FarmSpeed, 1)
-    local result
-
-    if State.FarmUnder then
-        local depthY = coinPos.Y - FARM_DEPTH
-        if not Farm.under then
-            -- mergulha na vertical (direto embaixo de onde você está)
-            local p = Farm.pos.Position
-            Farm.setPos(root, Vector3.new(p.X, depthY, p.Z))
-            Farm.under = true
-        end
-        result = Farm.glide(root, hum, coin, Vector3.new(coinPos.X, depthY, coinPos.Z), speed)
     else
-        result = Farm.glide(root, hum, coin, coinPos, speed)
+        setLockActive(false)
+        if LockGui then
+            LockGui.Enabled = false
+        end
     end
+end
 
-    if result == "stopped" then
-        Farm.release()
+-- Botão flutuante "Trocar Alvo": passa a trava pro próximo player mais perto
+local SwitchGui, SwitchButton
+
+local function createSwitchGui()
+    if SwitchGui then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
+
+    -- Fica logo acima do botão do Lock On
+    SwitchGui, SwitchButton = createFloatingButton(
+        "BukSwitch",
+        "TROCAR\nALVO",
+        math.max(vp.X - BUTTON_SIZE - 240, 0),
+        math.max(vp.Y * 0.5 - BUTTON_SIZE / 2 - BUTTON_SIZE - 16, 0),
+        switchLockTarget
+    )
+    SwitchButton.TextSize = 11
+end
+
+local function setSwitchButtonEnabled(state)
+    if state then
+        createSwitchGui()
+    end
+    if SwitchGui then
+        SwitchGui.Enabled = state
+    end
+end
+
+-- Roda depois do script de câmera do Roblox para a trava valer
+pcall(function()
+    RunService:UnbindFromRenderStep("BukLockOn")
+end)
+RunService:BindToRenderStep("BukLockOn", Enum.RenderPriority.Camera.Value + 1, function()
+    if not (LockOn.Enabled and LockOn.Active) then
         return
     end
 
-    if result == "arrived" then
-        if State.FarmUnder then
-            -- sobe até a moeda (esse é o ponto de volta seguro se parar agora)
-            Farm.setPos(root, coinPos)
-            Farm.under  = false
-            Farm.safeCF = CFrame.new(coinPos + Vector3.new(0, 2, 0))
-        end
-
-        if firetouchinterest then
-            pcall(function()
-                firetouchinterest(root, coin, 0)
-                firetouchinterest(root, coin, 1)
-            end)
-        end
-
-        -- a moeda já conta como visitada: não volta nela agora (mesmo se o servidor demorar pra confirmar)
-        Farm.visited[coin] = true
-        if Farm.waitCollected(coin) then
-            Farm.count = Farm.count + 1
-        else
-            -- sem confirmação ainda: fica pendente (conta quando sumir)
-            Farm.tries[coin]   = (Farm.tries[coin] or 0) + 1
-            Farm.pending[coin] = true
-        end
-
-        -- já desce de volta pra baixo do mapa
-        if State.FarmUnder and Farm.engaged and root.Parent then
-            Farm.setPos(root, Vector3.new(coinPos.X, coinPos.Y - FARM_DEPTH, coinPos.Z))
-            Farm.under = true
-        end
-
-        if State.FarmSafe then
-            task.wait(0.02 + math.random() * 0.08)
-        end
-
-    elseif result == "timeout" then
-        -- moeda que não dá pra alcançar: desiste depois de 3 tentativas
-        Farm.tries[coin] = (Farm.tries[coin] or 0) + 1
-        if Farm.tries[coin] >= 3 then
-            Farm.visited[coin] = true
-        end
+    local cam = Workspace.CurrentCamera
+    if not cam then
+        return
     end
+    local target = LockOn.Target
+    local part = target and getTargetPart(target)
+
+    if not part or (part.Position - getOrigin()).Magnitude > LockOn.MaxDistance then
+        -- alvo morreu, saiu ou ficou longe demais.
+        -- findNearestTarget já ignora morto/longe, então nunca devolve o alvo que acabou de cair.
+        local nextTarget = LockOn.AutoSwitch and findNearestTarget() or nil
+        if not nextTarget then
+            if LockOn.AutoSwitch then
+                notifyOnce("lockLost", "Lock On", "Sem mais alvos por perto. Lock desligado.")
+            end
+            setLockActive(false)
+            return
+        end
+        LockOn.Target = nextTarget
+        LockOn.List = nil
+        part = getTargetPart(nextTarget)
+    end
+
+    cam.CFrame = CFrame.lookAt(cam.CFrame.Position, part.Position)
 end)
 
--- ═══════════════════════════════════════════════════════════
---  12. MAIN: CFrame, Infinite Jump, Noclip, Anti-Fling
--- ═══════════════════════════════════════════════════════════
+----------------------------------------------------------------
+-- Combate: Auto Desvio
+----------------------------------------------------------------
+local Combat = {
+    FaceTarget = false,
 
--- CFrame (só funciona no ar, pulando e correndo)
-local function isInAir(hum)
-    if hum.FloorMaterial ~= Enum.Material.Air then
-        return false
-    end
-    local st = hum:GetState()
-    return st == Enum.HumanoidStateType.Jumping
-        or st == Enum.HumanoidStateType.Freefall
-end
-
-track(RunService.Heartbeat:Connect(function(dt)
-    if not State.CFrameOn then return end
-    if Farm.engaged or flingRunning then return end
-
-    local char = LocalPlayer.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not (hum and root) or hum.Health <= 0 then return end
-    if not isInAir(hum) then return end
-
-    local dir = hum.MoveDirection
-    if dir.Magnitude < 0.1 then return end
-
-    root.CFrame = root.CFrame + (dir * State.CFrameSpeed * dt)
-end))
-
--- Infinite Jump
-track(UserInputService.JumpRequest:Connect(function()
-    if not State.InfJump then return end
-    local char = LocalPlayer.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 0 then
-        hum:ChangeState(Enum.HumanoidStateType.Jumping)
-    end
-end))
-
--- Noclip e Anti-Fling (guardam o CanCollide original para restaurar ao desligar)
-local noclipBackup = setmetatable({}, { __mode = "k" })
-local antiBackup   = setmetatable({}, { __mode = "k" })
-
-local function restoreBackup(backup)
-    for part, original in pairs(backup) do
-        if part and part.Parent then
-            pcall(function()
-                part.CanCollide = original
-            end)
-        end
-        backup[part] = nil
-    end
-end
-
-do
-    local noclipWas   = false
-    local noclipChar  = nil
-    local noclipParts = {}
-    local noclipAt    = 0
-    local antiParts   = {}
-    local antiAt      = 0
-
-    track(RunService.Stepped:Connect(function()
-        -- Noclip (lista de peças em cache). Pausa enquanto o Fling roda
-        -- (o Fling precisa de colisão pra funcionar).
-        if State.Noclip and not flingRunning then
-            noclipWas = true
-            local char = LocalPlayer.Character
-            if char then
-                local now = os.clock()
-                if char ~= noclipChar or now - noclipAt > Perf.cacheRefresh then
-                    noclipChar  = char
-                    noclipAt    = now
-                    noclipParts = {}
-                    for _, d in ipairs(char:GetDescendants()) do
-                        if d:IsA("BasePart") then
-                            noclipParts[#noclipParts + 1] = d
-                        end
-                    end
-                end
-                for i = 1, #noclipParts do
-                    local part = noclipParts[i]
-                    if part.CanCollide and part.Parent then
-                        if noclipBackup[part] == nil then
-                            noclipBackup[part] = true
-                        end
-                        part.CanCollide = false
-                    end
-                end
-            end
-        elseif noclipWas then
-            noclipWas  = false
-            noclipChar = nil
-            restoreBackup(noclipBackup)
-        end
-
-        -- Anti-Fling: tira a colisão dos OUTROS jogadores com você
-        -- (pausa enquanto o Fling roda, senão o alvo não seria atingido)
-        if State.AntiFling and not flingRunning then
-            local now = os.clock()
-            if now - antiAt > math.min(Perf.cacheRefresh, 0.75) then
-                antiAt    = now
-                antiParts = {}
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character then
-                        for _, part in ipairs(p.Character:GetChildren()) do
-                            if part:IsA("BasePart") then
-                                antiParts[#antiParts + 1] = part
-                            end
-                        end
-                    end
-                end
-            end
-            for i = 1, #antiParts do
-                local part = antiParts[i]
-                if part.CanCollide and part.Parent then
-                    if antiBackup[part] == nil then
-                        antiBackup[part] = true
-                    end
-                    part.CanCollide = false
-                end
-            end
-        else
-            antiAt = 0
-            if flingRunning then
-                restoreBackup(antiBackup)
-            end
-        end
-    end))
-end
-
--- Anti-Fling: se começar a girar/voar rápido demais, zera a velocidade
-track(RunService.Heartbeat:Connect(function()
-    if not State.AntiFling or flingRunning then return end
-
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    if root.AssemblyAngularVelocity.Magnitude > 100
-        or root.AssemblyLinearVelocity.Magnitude > 300 then
-        root.AssemblyAngularVelocity = Vector3.zero
-        root.AssemblyLinearVelocity  = Vector3.zero
-    end
-end))
-
--- ═══════════════════════════════════════════════════════════
---  12A. X-RAY (aba Main) e EXTRAS (aba Extras)
---  - Tudo é lido do State por loops (liga/desliga sem precisar de callback)
---  - Cada recurso guarda o valor original e devolve ao desligar / descarregar
---    (o Unload chama tudo que estiver em Extra.restore)
--- ═══════════════════════════════════════════════════════════
-local Extra = { restore = {} }
-
--- X-Ray: deixa o mapa transparente só pra você (LocalTransparencyModifier não replica)
-do
-    local XRay = {
-        on      = false,
-        token   = 0,
-        applied = nil,
-        touched = setmetatable({}, { __mode = "k" }),
-        queue   = {},
-    }
-
-    function XRay.value()
-        return math.clamp(State.XRayLevel, 10, 95) / 100
-    end
-
-    -- Não mexe em: jogadores/NPCs, ferramentas, moedas e a arma dropada
-    function XRay.skip(part)
-        if part.Name == "GunDrop" then return true end
-        local a = part.Parent
-        while a and a ~= Workspace do
-            if a.Name == "CoinContainer" or a.Name == "GunDrop" then return true end
-            if a:IsA("Tool") or a:IsA("Accessory") then return true end
-            if a:IsA("Model") and a:FindFirstChildOfClass("Humanoid") then return true end
-            a = a.Parent
-        end
-        return false
-    end
-
-    function XRay.tryPart(part)
-        if XRay.touched[part] then return end
-        if not part:IsA("BasePart") or part:IsA("Terrain") then return end
-        if part.Transparency >= 0.9 or XRay.skip(part) then return end
-        XRay.touched[part] = true
-        pcall(function()
-            part.LocalTransparencyModifier = XRay.value()
-        end)
-    end
-
-    -- Varre o Workspace em pedaços (não trava o jogo em mapa grande)
-    function XRay.sweep()
-        XRay.token = XRay.token + 1
-        local my, n = XRay.token, 0
-        for _, d in ipairs(Workspace:GetDescendants()) do
-            if not (alive and State.XRay) or XRay.token ~= my then return end
-            XRay.tryPart(d)
-            n = n + 1
-            if n % 300 == 0 then task.wait() end
-        end
-    end
-
-    function XRay.clear()
-        XRay.token = XRay.token + 1
-        XRay.on, XRay.applied, XRay.queue = false, nil, {}
-        for part in pairs(XRay.touched) do
-            if part.Parent then
-                pcall(function()
-                    part.LocalTransparencyModifier = 0
-                end)
-            end
-            XRay.touched[part] = nil
-        end
-    end
-    Extra.restore[#Extra.restore + 1] = XRay.clear
-
-    -- peças que aparecem depois (mapa novo, respawn...) entram numa fila
-    track(Workspace.DescendantAdded:Connect(function(d)
-        if XRay.on and d:IsA("BasePart") then
-            XRay.queue[#XRay.queue + 1] = d
-        end
-    end))
-
-    loop("xray", 0.5, function()
-        if not State.XRay then
-            if XRay.on then XRay.clear() end
-            return
-        end
-
-        if not XRay.on then
-            XRay.on = true
-            XRay.applied = XRay.value()
-            XRay.sweep()
-        end
-
-        -- mexeu no slider: reaplica em tudo
-        local v = XRay.value()
-        if v ~= XRay.applied then
-            XRay.applied = v
-            for part in pairs(XRay.touched) do
-                if part.Parent then
-                    pcall(function()
-                        part.LocalTransparencyModifier = v
-                    end)
-                end
-            end
-        end
-
-        local q = XRay.queue
-        XRay.queue = {}
-        for i = 1, #q do
-            if q[i].Parent then
-                XRay.tryPart(q[i])
-            end
-            if i % 300 == 0 then task.wait() end
-        end
-    end)
-end
-
--- Extras: Fullbright, No Fog, FOV, Zoom e Walk Speed
-do
-    local Lighting = game:GetService("Lighting")
-
-    local function setProps(obj, props)
-        for k, v in pairs(props) do
-            pcall(function()
-                obj[k] = v
-            end)
-        end
-    end
-
-    -- Fullbright e No Fog
-    local fullBackup, fogBackup = nil, nil
-    local FULL_LIGHT = Color3.fromRGB(178, 178, 178)
-
-    local function restoreLight()
-        if fullBackup then
-            setProps(Lighting, fullBackup)
-            fullBackup = nil
-        end
-        if fogBackup then
-            setProps(Lighting, fogBackup)
-            fogBackup = nil
-        end
-    end
-    Extra.restore[#Extra.restore + 1] = restoreLight
-
-    loop("lighting", 0.25, function()
-        if State.Fullbright then
-            fullBackup = fullBackup or {
-                Brightness     = Lighting.Brightness,
-                ClockTime      = Lighting.ClockTime,
-                GlobalShadows  = Lighting.GlobalShadows,
-                Ambient        = Lighting.Ambient,
-                OutdoorAmbient = Lighting.OutdoorAmbient,
-            }
-            setProps(Lighting, {
-                Brightness     = 2,
-                ClockTime      = 14,
-                GlobalShadows  = false,
-                Ambient        = FULL_LIGHT,
-                OutdoorAmbient = FULL_LIGHT,
-            })
-        elseif fullBackup then
-            setProps(Lighting, fullBackup)
-            fullBackup = nil
-        end
-
-        if State.NoFog then
-            fogBackup = fogBackup or { FogEnd = Lighting.FogEnd }
-            setProps(Lighting, { FogEnd = 1e6 })
-        elseif fogBackup then
-            setProps(Lighting, fogBackup)
-            fogBackup = nil
-        end
-    end)
-
-    -- Field of View
-    local fovBackup = nil
-    track(RunService.RenderStepped:Connect(function()
-        local cam = Workspace.CurrentCamera
-        if not cam then return end
-        if State.FovOn then
-            fovBackup = fovBackup or cam.FieldOfView
-            cam.FieldOfView = State.Fov
-        elseif fovBackup then
-            cam.FieldOfView = fovBackup
-            fovBackup = nil
-        end
-    end))
-    Extra.restore[#Extra.restore + 1] = function()
-        local cam = Workspace.CurrentCamera
-        if cam and fovBackup then
-            cam.FieldOfView = fovBackup
-        end
-        fovBackup = nil
-    end
-
-    -- Zoom da câmera liberado
-    local zoomBackup = nil
-    local function restoreZoom()
-        if zoomBackup then
-            LocalPlayer.CameraMaxZoomDistance = zoomBackup.max
-            LocalPlayer.CameraMinZoomDistance = zoomBackup.min
-            zoomBackup = nil
-        end
-    end
-    Extra.restore[#Extra.restore + 1] = restoreZoom
-
-    loop("zoom", 0.5, function()
-        if State.UnlockZoom then
-            zoomBackup = zoomBackup or {
-                max = LocalPlayer.CameraMaxZoomDistance,
-                min = LocalPlayer.CameraMinZoomDistance,
-            }
-            LocalPlayer.CameraMaxZoomDistance = 500
-            LocalPlayer.CameraMinZoomDistance = 0
-        else
-            restoreZoom()
-        end
-    end)
-
-    -- Walk Speed (pausa enquanto o Auto Farm ou o Fling controlam o personagem)
-    local walkBackup = setmetatable({}, { __mode = "k" })
-    track(RunService.Heartbeat:Connect(function()
-        local char = LocalPlayer.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-
-        if State.WalkOn and not Farm.engaged and not flingRunning then
-            if walkBackup[hum] == nil then
-                walkBackup[hum] = hum.WalkSpeed
-            end
-            if hum.WalkSpeed ~= State.WalkSpeed then
-                hum.WalkSpeed = State.WalkSpeed
-            end
-        elseif walkBackup[hum] ~= nil then
-            hum.WalkSpeed = walkBackup[hum]
-            walkBackup[hum] = nil
-        end
-    end))
-    Extra.restore[#Extra.restore + 1] = function()
-        for hum, speed in pairs(walkBackup) do
-            if hum.Parent then
-                pcall(function()
-                    hum.WalkSpeed = speed
-                end)
-            end
-            walkBackup[hum] = nil
-        end
-    end
-end
-
--- ═══════════════════════════════════════════════════════════
---  12B. TROLL: FLING
---  - Gira o seu personagem em alta velocidade em cima do player escolhido
---  - Força sempre no máximo (sem slider de velocidade)
---  - Guarda a posição de origem e volta pra ela quando desliga
---  - Pausa Noclip / Anti-Fling / CFrame / Auto Farm enquanto roda
--- ═══════════════════════════════════════════════════════════
-local FLING_LIN = 9e7 -- força máxima (fixa)
-local FLING_ANG = 9e8
-local FLING_OFFSETS = {
-    CFrame.new(0, 1.5, 0),
-    CFrame.new(0, -1.5, 0),
-    CFrame.new(2.25, 1.5, -2.25),
-    CFrame.new(-2.25, -1.5, 2.25),
+    -- Auto Desvio: quando qualquer player chega perto, dá um passo pro lado
+    Dodge = {
+        Enabled = false,
+        Range = 15,
+        StepDistance = 10,
+        Cooldown = 0.2,
+        Last = 0,
+        Busy = false, -- true enquanto o passo acontece (não empilha um desvio em cima do outro)
+    },
 }
 
-local flingToken    = 0
-local FlingDropdown = nil -- preenchidos pelo buildUI
-local FlingToggle   = nil
-
-local function flingList(leaving)
-    local names = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p ~= leaving then
-            names[#names + 1] = p.Name
-        end
-    end
-    table.sort(names, function(a, b)
-        return a:lower() < b:lower()
-    end)
-    return names
-end
-
--- Alvos específicos (os nomes de jogador não podem ter "[", então não conflita)
-local FLING_ROLE_TARGETS = { ["[Sheriff]"] = "Sheriff", ["[Murderer]"] = "Murderer" }
-
--- Lista do dropdown do Fling: [Sheriff], [Murderer] e depois os jogadores
-local function flingValues(leaving)
-    local values = { "[Sheriff]", "[Murderer]" }
-    for _, n in ipairs(flingList(leaving)) do
-        values[#values + 1] = n
-    end
-    return values
-end
-
--- Acha quem está com o role escolhido (prefere quem está vivo, então troca sozinho
--- se o Sheriff morrer e outro jogador pegar a arma)
-local function flingRolePlayer(role)
-    local fallback = nil
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and getRole(p) == role then
-            local c = p.Character
-            local h = c and c:FindFirstChildOfClass("Humanoid")
-            if h and h.Health > 0 and not deadData[p.Name] then
-                return p
-            end
-            fallback = fallback or p
-        end
-    end
-    return fallback
-end
-
-local function refreshFlingList(leaving)
-    if not FlingDropdown then return end
+-- Reativa os botões à força (botão "Restaurar Botões" na aba Mod)
+local function restoreControls()
     pcall(function()
-        FlingDropdown:Refresh(flingValues(leaving))
+        GuiService.TouchControlsEnabled = true
+    end)
+    pcall(function()
+        local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
+        local module = scripts and scripts:FindFirstChild("PlayerModule")
+        if module then
+            local controls = require(module):GetControls()
+            controls:Enable()
+            if UserInputService.TouchEnabled then
+                controls:OnLastInputTypeChanged(Enum.UserInputType.Touch)
+            end
+        end
     end)
 end
 
-track(Players.PlayerAdded:Connect(function()
-    refreshFlingList()
-end))
-track(Players.PlayerRemoving:Connect(function(p)
-    refreshFlingList(p)
-end))
-
--- Retorna: char, humanoid, root (ou nil se você estiver morto)
-local function flingMyChar()
-    local char = LocalPlayer.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+local function getAlive(plr)
+    local char = plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if hum and root and hum.Health > 0 and root.Parent then
-        return char, hum, root
-    end
-    return nil
-end
-
--- Retorna: player (nil se saiu do jogo), humanoid e root (nil se morto/respawnando)
-local function flingTargetInfo()
-    local name = State.FlingTarget
-    local role = type(name) == "string" and FLING_ROLE_TARGETS[name] or nil
-    local p
-    if role then
-        p = flingRolePlayer(role)
-    else
-        p = type(name) == "string" and Players:FindFirstChild(name) or nil
-    end
-    if not (p and p:IsA("Player")) or p == LocalPlayer then
-        return nil
-    end
-    local c = p.Character
-    local h = c and c:FindFirstChildOfClass("Humanoid")
-    local r = c and c:FindFirstChild("HumanoidRootPart")
-    if h and r and h.Health > 0 then
-        return p, h, r
-    end
-    return p, nil, nil
-end
-
--- Segura o personagem parado num lugar (zera a velocidade/giro)
-local function flingSettle(root, cf, frames)
-    for _ = 1, frames do
-        if not root.Parent then return end
-        root.CFrame = cf
-        root.AssemblyLinearVelocity  = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-        task.wait()
-    end
-end
-
-local function flingLoop(myToken)
-    -- se um Fling anterior ainda está terminando, espera ele acabar
-    local waited = os.clock()
-    while flingRunning and os.clock() - waited < 1.5 do
-        task.wait()
-    end
-    if not alive or flingToken ~= myToken then return end
-
-    flingRunning = true
-    local reason     = "off"
-    local origin     = nil
-    local oldDestroy = nil
-
-    local okRun, err = pcall(function()
-        local _, _, startRoot = flingMyChar()
-        if not startRoot then
-            reason = "dead"
-            return
-        end
-        origin = startRoot.CFrame
-
-        -- evita morrer no void enquanto você está girando
-        pcall(function()
-            oldDestroy = Workspace.FallenPartsDestroyHeight
-            Workspace.FallenPartsDestroyHeight = 0 / 0
-        end)
-
-        local angle, idx = 0, 0
-        local cycleStart = os.clock()
-
-        while alive and flingToken == myToken and State.Fling do
-            local _, cHum, cRoot = flingMyChar()
-            if not cRoot then
-                reason = "dead"
-                break
-            end
-
-            local target, tHum, tRoot = flingTargetInfo()
-            if not target then
-                reason = FLING_ROLE_TARGETS[State.FlingTarget] and "norole" or "left"
-                break
-            end
-
-            if tHum and tRoot then
-                -- a câmera acompanha o alvo (evita enjoo com seu personagem girando)
-                pcall(function()
-                    local cam = Workspace.CurrentCamera
-                    if cam and cam.CameraSubject ~= tHum then
-                        cam.CameraSubject = tHum
-                    end
-                end)
-
-                local speed = tRoot.AssemblyLinearVelocity.Magnitude
-                if speed > 500 or os.clock() - cycleStart > 2 then
-                    -- o alvo já voou (ou não funcionou): volta pro lugar e tenta de novo
-                    flingSettle(cRoot, origin, 12)
-                    task.wait(0.25)
-                    cycleStart = os.clock()
-                else
-                    angle = angle + 100
-                    idx = idx % #FLING_OFFSETS + 1
-                    local lead = tHum.MoveDirection * (speed / 1.25)
-                    cRoot.CFrame = CFrame.new(tRoot.Position + lead)
-                        * FLING_OFFSETS[idx]
-                        * CFrame.Angles(math.rad(angle), 0, 0)
-                    cRoot.AssemblyLinearVelocity  = Vector3.new(FLING_LIN, FLING_LIN * 10, FLING_LIN)
-                    cRoot.AssemblyAngularVelocity = Vector3.new(FLING_ANG, FLING_ANG, FLING_ANG)
-                    task.wait()
-                end
-            else
-                -- alvo morto/respawnando: fica parado e espera (a origem acompanha você)
-                pcall(function()
-                    local cam = Workspace.CurrentCamera
-                    if cam and cHum and cam.CameraSubject ~= cHum then
-                        cam.CameraSubject = cHum
-                    end
-                end)
-                origin = cRoot.CFrame
-                cycleStart = os.clock()
-                task.wait(0.2)
-            end
-        end
-    end)
-
-    if not okRun then
-        reason = "error"
-        safeWarn(err, "fling")
-    end
-
-    -- Limpeza (sempre roda): volta pra posição original e restaura câmera/altura de queda
-    pcall(function()
-        local _, hum2, root2 = flingMyChar()
-        if root2 and origin then
-            flingSettle(root2, origin, 20)
-        end
-        local cam = Workspace.CurrentCamera
-        if cam and hum2 then
-            cam.CameraSubject = hum2
-        end
-    end)
-    pcall(function()
-        if oldDestroy ~= nil then
-            Workspace.FallenPartsDestroyHeight = oldDestroy
-        end
-    end)
-    flingRunning = false
-
-    -- Parou sozinho (morreu, o alvo saiu...): desliga o botão
-    if reason ~= "off" and alive and flingToken == myToken then
-        State.Fling = false
-        if reason == "dead" then
-            notify(L("fling_dead"), "triangle-alert", 3)
-        elseif reason == "left" then
-            notify(L("fling_left"), "triangle-alert", 3)
-        elseif reason == "norole" then
-            notify(L("fling_norole"), "triangle-alert", 3)
-        end
-        pcall(function()
-            if FlingToggle then
-                FlingToggle:Set(false)
-            end
-        end)
-    end
-end
-
-local function stopFling()
-    flingToken = flingToken + 1 -- o loop percebe, limpa tudo e termina
-end
-
--- Retorna: ok (bool) e o motivo ("dead" | "notarget" | "tdead")
-local function startFling()
-    if not flingMyChar() then
-        return false, "dead"
-    end
-    local target, tHum, tRoot = flingTargetInfo()
-    if not target then
-        if FLING_ROLE_TARGETS[State.FlingTarget] then
-            return false, "norole"
-        end
-        return false, "notarget"
-    end
-    if not (tHum and tRoot) then
-        return false, "tdead"
-    end
-
-    flingToken = flingToken + 1
-    task.spawn(flingLoop, flingToken)
-    return true
-end
-
--- ═══════════════════════════════════════════════════════════
---  13. AIMBOT MM2: Magic Bullet e Shoot Through Walls
---  - Magic Bullet: a bala do SEU tiro vai direto pro murder (posição lida na hora do tiro)
---  - Shoot Through Walls: parede não bloqueia o tiro (raycast da Gun + tag WeaponPassthrough)
--- ═══════════════════════════════════════════════════════════
-local magicAim  = nil
-local forcedAim = nil
-
-local function getGun()
-    local char = LocalPlayer.Character
-    local g = char and char:FindFirstChild("Gun")
-    if g and g:IsA("Tool") then
-        return g, true
-    end
-    local bp = LocalPlayer:FindFirstChild("Backpack")
-    g = bp and bp:FindFirstChild("Gun")
-    if g and g:IsA("Tool") then
-        return g, false
-    end
-    return nil, false
-end
-
--- Retorna o personagem e o HumanoidRootPart se o jogador estiver vivo
-local function playerAliveChar(p)
-    local c = p.Character
-    local h = c and c:FindFirstChildOfClass("Humanoid")
-    local r = c and c:FindFirstChild("HumanoidRootPart")
-    if h and r and h.Health > 0 and not deadData[p.Name] then
-        return c, r
+    if hum and root and hum.Health > 0 then
+        return hum, root
     end
     return nil, nil
 end
 
-local murdCache, murdAt = nil, 0
-local function findMurderer()
-    local now = os.clock()
-    if now - murdAt < 0.1 then
-        return murdCache
-    end
-    murdAt    = now
-    murdCache = nil
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and getRole(p) == "Murderer" and playerAliveChar(p) then
-            murdCache = p
-            break
+-- Player vivo mais perto de você dentro da distância de detecção (ou nil)
+local function findThreat(myRoot)
+    local D = Combat.Dodge
+    local best, bestDist = nil, D.Range
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local hum, root = getAlive(plr)
+            if hum and root then
+                local d = (myRoot.Position - root.Position).Magnitude
+                if d <= bestDist then
+                    best, bestDist = root, d
+                end
+            end
         end
     end
-    return murdCache
+    return best
 end
 
--- Estado do Aimbot MM2 (tudo numa tabela só, pra não estourar o limite de variáveis locais)
-local Aim = {
-    active   = false, -- true quando dá pra atirar (vivo, com Gun, não é murder, murder vivo)
-    char     = nil,   -- personagem do murder
-    root     = nil,   -- HumanoidRootPart do murder
-    head     = nil,   -- Head do murder
-    gun      = nil,   -- a Tool "Gun"
-    equipped = false, -- Gun na mão
-    ping     = 0.1,   -- ping em segundos (compensação do tiro)
-    tagged   = {},    -- peças que EU marquei como atravessáveis (Shoot Through Walls)
-    taggedN  = 0,
-}
-
--- Ping atual em segundos
-function Aim.pingNow()
-    local ok, v = pcall(function()
-        return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
-    end)
-    if ok and type(v) == "number" then
-        return v / 1000
-    end
-    local ok2, p = pcall(function()
-        return LocalPlayer:GetNetworkPing()
-    end)
-    if ok2 and type(p) == "number" then
-        return p
-    end
-    return 0.1
+-- Tem chão logo embaixo desse ponto? (pra não mandar o personagem pra fora do mapa)
+local function hasGroundBelow(pos, params, depth)
+    return Workspace:Raycast(pos, Vector3.new(0, -(depth or 60), 0), params) ~= nil
 end
 
--- Ponto de mira (lido NA HORA do tiro, então nunca fica velho):
--- Torso (HumanoidRootPart) ou Head + previsão de movimento pelo ping
-function Aim.point()
-    local root = Aim.root
-    if not (root and root.Parent) then
-        return nil
+-- Escolhe um lado livre (sem parede e com chão) para desviar
+local function pickDodgeDirection(myRoot, threatRoot, distance)
+    local away = (myRoot.Position - threatRoot.Position) * Vector3.new(1, 0, 1)
+    if away.Magnitude < 0.1 then
+        away = myRoot.CFrame.LookVector * Vector3.new(1, 0, 1)
     end
-
-    local part = root
-    if State.AimPart == "Head" and Aim.head and Aim.head.Parent then
-        part = Aim.head
+    if away.Magnitude < 0.1 then
+        away = Vector3.zAxis
     end
+    away = away.Unit
 
-    local pos = part.Position
-    if State.AimPredict then
-        local vel = root.AssemblyLinearVelocity
-        vel = Vector3.new(vel.X, 0, vel.Z)
-        if vel.Magnitude > 60 then
-            vel = vel.Unit * 60
-        end
-        pos = pos + vel * math.clamp(Aim.ping, 0, 0.3)
-    end
-    return pos
-end
-
--- Shoot Through Walls (parte 1): remove as marcas que EU coloquei
-function Aim.clearTags()
-    for part in pairs(Aim.tagged) do
-        pcall(function()
-            CollectionService:RemoveTag(part, "WeaponPassthrough")
-        end)
-        Aim.tagged[part] = nil
-    end
-    Aim.taggedN = 0
-end
-
--- Shoot Through Walls (parte 2): tudo que estiver entre você e o murder
--- recebe a tag "WeaponPassthrough" (a mesma que o jogo usa pras peças que a bala atravessa)
-function Aim.markWalls(fromPos, toPos, mChar)
-    if Aim.taggedN > 250 then
-        Aim.clearTags()
+    local side = away:Cross(Vector3.yAxis)
+    if math.random() < 0.5 then
+        side = -side
     end
 
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.IgnoreWater = true
+    params.FilterDescendantsInstances = { LocalPlayer.Character }
 
-    local ex  = { LocalPlayer.Character, mChar }
-    local dir = toPos - fromPos
-
-    for _ = 1, 12 do
-        params.FilterDescendantsInstances = ex
-        local hit = Workspace:Raycast(fromPos, dir, params)
-        if not hit then break end
-
-        local part = hit.Instance
-        if not part then break end
-        ex[#ex + 1] = part
-
-        if part:IsA("BasePart") and not part:IsA("Terrain")
-            and not CollectionService:HasTag(part, "WeaponPassthrough") then
-            CollectionService:AddTag(part, "WeaponPassthrough")
-            Aim.tagged[part] = true
-            Aim.taggedN = Aim.taggedN + 1
-        end
-    end
-end
-
--- Em qual argumento do remote vai a posição do tiro?
-function Aim.findSlot(args, count)
-    local a2 = typeof(args[2])
-    if a2 == "CFrame" or a2 == "Vector3" then
-        return 2
-    end
-    for i = 1, count do
-        if typeof(args[i]) == "Vector3" then
-            return i
-        end
-    end
-    for i = count, 1, -1 do
-        if typeof(args[i]) == "CFrame" then
-            return i
+    for _, dir in ipairs({ side, -side, away }) do
+        local hit = Workspace:Raycast(myRoot.Position, dir * (distance + 2), params)
+        if not hit and hasGroundBelow(myRoot.Position + dir * distance, params, 60) then
+            return dir
         end
     end
     return nil
 end
 
--- Esse remote é o tiro da Gun?
-function Aim.isShootRemote(inst)
-    local parent = inst.Parent
-    return inst.Name:lower():find("shoot", 1, true) ~= nil
-        or (parent ~= nil and parent.Name == "CreateBeam")
-end
-
--- O raycast veio do script da Gun (e não de outro script do jogo)?
-function Aim.callerIsGun()
-    if not getcallingscript then
-        return true
-    end
-    local ok, scr = pcall(getcallingscript)
-    if not ok or typeof(scr) ~= "Instance" then
-        return true
-    end
-
-    local node, depth = scr, 0
-    while node and depth < 12 do
-        if node == Aim.gun then
-            return true
-        end
-        node  = node.Parent
-        depth = depth + 1
-    end
-
-    local n = scr.Name:lower()
-    return n:find("knife", 1, true) ~= nil or n:find("gun", 1, true) ~= nil
-end
-
--- Hook do tiro (precisa de executor com hookmetamethod ou getrawmetatable)
-local hookInstalled = false
-local oldNamecall   = nil
-
-local function aimHandler(self, ...)
-    if not (alive and Aim.active) or typeof(self) ~= "Instance" then
-        return oldNamecall(self, ...)
-    end
-
-    local method = getnamecallmethod()
-
-    if not (checkcaller and checkcaller()) then
-        -- 1) MAGIC BULLET: troca a posição do tiro pela posição do murder
-        if State.MagicBullet
-            and (method == "FireServer" or method == "InvokeServer")
-            and Aim.isShootRemote(self) then
-
-            local aim = Aim.point()
-            if aim then
-                local args  = { ... }
-                local count = select("#", ...)
-                local slot  = Aim.findSlot(args, count)
-
-                if slot then
-                    if typeof(args[slot]) == "CFrame" then
-                        args[slot] = CFrame.new(aim)
-                    else
-                        args[slot] = aim
-                    end
-                    State.MagicShots = (State.MagicShots or 0) + 1
-                    if setnamecallmethod then
-                        setnamecallmethod(method)
-                    end
-                    return oldNamecall(self, unpack(args, 1, count))
-                end
-            end
-
-        -- 2) SHOOT THROUGH WALLS: o raycast da Gun só enxerga o murder (parede não bloqueia)
-        elseif State.WallShot and Aim.equipped
-            and method == "Raycast" and self == Workspace then
-
-            local origin, direction = ...
-            if typeof(origin) == "Vector3" and typeof(direction) == "Vector3"
-                and Aim.char and Aim.char.Parent and Aim.callerIsGun() then
-
-                -- com Magic Bullet ligado, o raio também aponta direto pro murder
-                local aim = State.MagicBullet and Aim.point()
-                if aim then
-                    local to = aim - origin
-                    if to.Magnitude > 0.1 then
-                        direction = to.Unit * math.max(direction.Magnitude, to.Magnitude + 5)
-                    end
-                end
-
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Include
-                params.FilterDescendantsInstances = { Aim.char }
-                params.IgnoreWater = true
-
-                if setnamecallmethod then
-                    setnamecallmethod(method)
-                end
-                return oldNamecall(self, origin, direction, params)
-            end
-        end
-    end
-
-    if setnamecallmethod then
-        setnamecallmethod(method)
-    end
-    return oldNamecall(self, ...)
-end
-
-local function installAimHook()
-    if hookInstalled then
-        return true
-    end
-    if not getnamecallmethod then
-        return false
-    end
-
-    local fn = newcclosure and newcclosure(aimHandler) or aimHandler
-
-    if hookmetamethod then
-        local ok, old = pcall(hookmetamethod, game, "__namecall", fn)
-        if ok and old ~= nil then
-            oldNamecall = old
-            hookInstalled = true
-            return true
-        end
-    end
-
-    local ok = pcall(function()
-        local mt = getrawmetatable(game)
-        oldNamecall = mt.__namecall
-        if setreadonly then
-            setreadonly(mt, false)
-        elseif make_writeable then
-            make_writeable(mt)
-        end
-        mt.__namecall = fn
-        if setreadonly then
-            setreadonly(mt, true)
-        end
-    end)
-
-    hookInstalled = (ok and oldNamecall ~= nil)
-    return hookInstalled
-end
-
--- Escolhe o alvo (~20x por segundo) e mantém o ponto de mira sempre atualizado
-do
-    local scanAt, pingAt, wallAt = 0, 0, 0
-    State.MagicStatus = "off"
-
-    local function clearTarget()
-        Aim.active, Aim.equipped = false, false
-        Aim.char, Aim.root, Aim.head, Aim.gun = nil, nil, nil, nil
-        magicAim = nil
-        if Aim.taggedN > 0 then
-            Aim.clearTags()
-        end
-    end
-
-    track(RunService.Heartbeat:Connect(function()
-        if not (State.MagicBullet or State.WallShot) then
-            if Aim.active or Aim.taggedN > 0 then
-                clearTarget()
-            end
-            State.MagicStatus = "off"
-            return
-        end
-
-        local now = os.clock()
-
-        if now - pingAt > 0.5 then
-            pingAt = now
-            Aim.ping = Aim.pingNow()
-        end
-
-        if now - scanAt >= 0.05 then
-            scanAt = now
-
-            local ok, err = pcall(function()
-                if not hookInstalled then
-                    clearTarget()
-                    State.MagicStatus = "nohook"
-                    return
-                end
-
-                local char = LocalPlayer.Character
-                local root = char and char:FindFirstChild("HumanoidRootPart")
-                if not (char and root) then
-                    clearTarget()
-                    State.MagicStatus = "dead"
-                    return
-                end
-
-                local gun, equipped = getGun()
-                if not gun then
-                    clearTarget()
-                    State.MagicStatus = "nogun"
-                    return
-                end
-                if getRole(LocalPlayer) == "Murderer" then
-                    clearTarget()
-                    State.MagicStatus = "murderer"
-                    return
-                end
-
-                local murderer = findMurderer()
-                if not murderer then
-                    clearTarget()
-                    State.MagicStatus = "nomurder"
-                    return
-                end
-                local mChar, mRoot = playerAliveChar(murderer)
-                if not mRoot then
-                    clearTarget()
-                    State.MagicStatus = "nomurder"
-                    return
-                end
-
-                Aim.char, Aim.root, Aim.head = mChar, mRoot, mChar:FindFirstChild("Head")
-                Aim.gun, Aim.equipped = gun, equipped
-                Aim.active = true
-                State.MagicStatus = "ready"
-
-                -- Shoot Through Walls: marca o que está entre você e o murder
-                if State.WallShot and now - wallAt >= 0.12 then
-                    wallAt = now
-                    Aim.markWalls(root.Position, mRoot.Position, mChar)
-                end
-            end)
-
-            if not ok then
-                clearTarget()
-                safeWarn(err, "magic")
-            end
-        end
-
-        magicAim = Aim.active and Aim.point() or nil
-    end))
-end
-
--- ═══════════════════════════════════════════════════════════
---  14. SETAS pro Murder / Sheriff (só quando estão fora da tela)
--- ═══════════════════════════════════════════════════════════
-local trackedMurderer = nil
-local trackedSheriff  = nil
-
--- Descobre quem é o Murderer e o Sheriff (vivos) ~5x por segundo
-loop("track-roles", function() return math.max(0.2, Perf.roleStep) end, function()
-    if not (State.ArrowMurder or State.ArrowSheriff) then
-        trackedMurderer = nil
-        trackedSheriff  = nil
+local function performDodge(myRoot, threatRoot)
+    local D = Combat.Dodge
+    if D.Busy then
         return
     end
 
-    local m, s = nil, nil
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local c = p.Character
-            local h = c and c:FindFirstChildOfClass("Humanoid")
-            local r = c and c:FindFirstChild("HumanoidRootPart")
-            if h and r and h.Health > 0 then
-                local role = getRole(p)
-                if role == "Murderer" then
-                    m = p
-                elseif role == "Sheriff" then
-                    s = p
-                end
+    local dir = pickDodgeDirection(myRoot, threatRoot, D.StepDistance)
+    if not dir then
+        return
+    end
+
+    -- Desliza rápido (6 frames) em vez de teleportar de uma vez
+    D.Busy = true
+    task.spawn(function()
+        local steps = 6
+        for _ = 1, steps do
+            if not myRoot.Parent then
+                break
+            end
+            myRoot.CFrame += dir * (D.StepDistance / steps)
+            task.wait()
+        end
+        D.Busy = false
+    end)
+end
+
+connect(RunService.Heartbeat, function()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root) or hum.Health <= 0 then
+        return
+    end
+
+    local now = os.clock()
+
+    -- Virar pro alvo do Lock On
+    if Combat.FaceTarget and LockOn.Enabled and LockOn.Active and LockOn.Target then
+        local part = getTargetPart(LockOn.Target)
+        if part then
+            local p = part.Position
+            local flat = Vector3.new(p.X, root.Position.Y, p.Z)
+            if (flat - root.Position).Magnitude > 0.5 then
+                root.CFrame = CFrame.lookAt(root.Position, flat)
             end
         end
     end
-    trackedMurderer = m
-    trackedSheriff  = s
+
+    -- Auto Desvio
+    local D = Combat.Dodge
+    if D.Enabled and not D.Busy and now - D.Last >= D.Cooldown then
+        local threat = findThreat(root)
+        if threat then
+            D.Last = now
+            performDodge(root, threat)
+        end
+    end
 end)
 
-local ArrowGui = newScreenGui("BukArrowGui", 90)
-
-local function makeArrow(color)
-    local arrow = Instance.new("TextLabel")
-    arrow.AnchorPoint = Vector2.new(0.5, 0.5)
-    arrow.Size = UDim2.fromOffset(34, 34)
-    arrow.BackgroundTransparency = 1
-    arrow.Text = "▲"
-    arrow.Font = Enum.Font.GothamBold
-    arrow.TextSize = 30
-    arrow.TextColor3 = color
-    arrow.TextStrokeTransparency = 0
-    arrow.TextStrokeColor3 = BLACK
-    arrow.Visible = false
-    arrow.Parent = ArrowGui
-
-    -- distância (separada da seta para não girar junto)
-    local label = Instance.new("TextLabel")
-    label.AnchorPoint = Vector2.new(0.5, 0.5)
-    label.Size = UDim2.fromOffset(60, 14)
-    label.BackgroundTransparency = 1
-    label.Text = ""
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 12
-    label.TextColor3 = color
-    label.TextStrokeTransparency = 0
-    label.TextStrokeColor3 = BLACK
-    label.Visible = false
-    label.Parent = ArrowGui
-
-    return { arrow = arrow, label = label }
-end
-
-local ArrowMurder  = makeArrow(ROLE_COLORS.Murderer)
-local ArrowSheriff = makeArrow(ROLE_COLORS.Sheriff)
-
-local function updateArrow(pair, target, enabled)
-    local arrow, label = pair.arrow, pair.label
-    local cam  = Workspace.CurrentCamera
-    local char = target and target.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-
-    if not (enabled and cam and root) then
-        arrow.Visible = false
-        label.Visible = false
-        return
-    end
-
-    local viewport = cam.ViewportSize
-    local sp = cam:WorldToViewportPoint(root.Position)
-    local onScreen = sp.Z > 0 and sp.X >= 0 and sp.X <= viewport.X and sp.Y >= 0 and sp.Y <= viewport.Y
-    if onScreen then
-        arrow.Visible = false
-        label.Visible = false
-        return
-    end
-
-    local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
-    local dir = Vector2.new(sp.X - center.X, sp.Y - center.Y)
-    if sp.Z < 0 then
-        dir = -dir
-    end
-    if dir.Magnitude < 1 then
-        dir = Vector2.new(0, 1)
-    end
-    dir = dir.Unit
-
-    -- Prende a seta na borda da tela (com margem)
-    local margin = 55
-    local mx = math.max(center.X - margin, 1)
-    local my = math.max(center.Y - margin, 1)
-    local s  = math.min(
-        mx / math.max(math.abs(dir.X), 0.0001),
-        my / math.max(math.abs(dir.Y), 0.0001)
-    )
-    local pos = center + dir * s
-
-    arrow.Position = UDim2.fromOffset(pos.X, pos.Y)
-    arrow.Rotation = math.deg(math.atan2(dir.X, -dir.Y))
-    arrow.Visible  = true
-
-    local dist = (cam.CFrame.Position - root.Position).Magnitude
-    label.Text     = string.format("%d", math.floor(dist))
-    label.Position = UDim2.fromOffset(pos.X, pos.Y + 24)
-    label.Visible  = true
-end
-
-do
-    local acc   = 0
-    local wasOn = false
-
-    track(RunService.RenderStepped:Connect(function(dt)
-        local on = State.ArrowMurder or State.ArrowSheriff
-        if not on then
-            if wasOn then
-                wasOn = false
-                pcall(function()
-                    updateArrow(ArrowMurder,  nil, false)
-                    updateArrow(ArrowSheriff, nil, false)
-                end)
-            end
-            return
-        end
-        wasOn = true
-
-        local stepT = Perf.arrowStep
-        if stepT > 0 then
-            acc = acc + dt
-            if acc < stepT - 0.002 then return end
-            acc = 0
-        end
-
-        local ok, err = pcall(function()
-            updateArrow(ArrowMurder,  trackedMurderer, State.ArrowMurder)
-            updateArrow(ArrowSheriff, trackedSheriff,  State.ArrowSheriff)
-        end)
-        if not ok then safeWarn(err, "arrows") end
-    end))
-end
-
--- ═══════════════════════════════════════════════════════════
---  14B. EXTRAS DA ABA SETTINGS
---  Anti-AFK, FPS Boost, Rejoin, Server Hop, Copiar ID do servidor e Auto Save
--- ═══════════════════════════════════════════════════════════
-local Util = {
-    afkConn   = nil, -- conexão do Anti-AFK
-    fpsBackup = nil, -- valores originais (FPS Boost)
+----------------------------------------------------------------
+-- Main: Full Bright + FPS Boost
+----------------------------------------------------------------
+local Bright = {
+    Enabled = false,
+    Original = nil, -- valores originais da iluminação
+    Atmos = setmetatable({}, { __mode = "k" }), -- Atmosphere -> valores originais
 }
 
--- Anti-AFK: o Roblox não te desconecta por ficar parado
-function Util.setAntiAfk(on)
-    if Util.afkConn then
-        pcall(function() Util.afkConn:Disconnect() end)
-        Util.afkConn = nil
+-- Chamada a cada frame (no BindToRenderStep da câmera), então o jogo não desfaz
+local function applyBright()
+    if not Bright.Enabled then
+        return
     end
-    if on then
-        Util.afkConn = LocalPlayer.Idled:Connect(function()
-            pcall(function()
-                local vu = game:GetService("VirtualUser")
-                vu:CaptureController()
-                vu:ClickButton2(Vector2.new())
-            end)
-        end)
+
+    Lighting.Brightness = 2
+    Lighting.ClockTime = 14
+    Lighting.FogStart = 0
+    Lighting.FogEnd = 100000
+    Lighting.Ambient = Color3.fromRGB(190, 190, 190)
+    Lighting.OutdoorAmbient = Color3.fromRGB(190, 190, 190)
+
+    -- FindFirstChildOfClass não cria tabela nova a cada frame (GetChildren criava: pesa no celular)
+    local atmos = Lighting:FindFirstChildOfClass("Atmosphere")
+    if atmos then
+        if Bright.Atmos[atmos] == nil then
+            Bright.Atmos[atmos] = { Density = atmos.Density, Haze = atmos.Haze, Offset = atmos.Offset }
+        end
+        atmos.Density = 0
+        atmos.Haze = 0
     end
 end
 
--- FPS Boost: sombras e qualidade gráfica no mínimo (desligar devolve o original)
-function Util.setFpsBoost(on)
-    local Lighting = game:GetService("Lighting")
-    if on then
-        if Util.fpsBackup then return end
-        local backup = {}
-        Util.fpsBackup = backup
+local function setBrightEnabled(state)
+    if state then
+        if Bright.Original == nil then
+            Bright.Original = {
+                Brightness = Lighting.Brightness,
+                ClockTime = Lighting.ClockTime,
+                FogStart = Lighting.FogStart,
+                FogEnd = Lighting.FogEnd,
+                Ambient = Lighting.Ambient,
+                OutdoorAmbient = Lighting.OutdoorAmbient,
+            }
+        end
+        Bright.Enabled = true
+        applyBright()
+    else
+        Bright.Enabled = false
+        if Bright.Original then
+            for prop, value in pairs(Bright.Original) do
+                pcall(function()
+                    Lighting[prop] = value
+                end)
+            end
+        end
+        Bright.Original = nil
+        for atmos, old in pairs(Bright.Atmos) do
+            if atmos.Parent then
+                pcall(function()
+                    atmos.Density = old.Density
+                    atmos.Haze = old.Haze
+                    atmos.Offset = old.Offset
+                end)
+            end
+        end
+        table.clear(Bright.Atmos)
+    end
+end
+
+local Perf = {
+    Enabled = false,
+    OrigShadows = nil,
+    OrigQuality = nil,
+    Disabled = setmetatable({}, { __mode = "k" }), -- efeitos que o script desligou
+    Conns = {},
+}
+
+local function disableEffect(inst)
+    if
+        (
+            inst:IsA("ParticleEmitter")
+            or inst:IsA("Trail")
+            or inst:IsA("Beam")
+            or inst:IsA("Smoke")
+            or inst:IsA("Fire")
+            or inst:IsA("Sparkles")
+            or inst:IsA("PostEffect")
+        ) and inst.Enabled
+    then
+        Perf.Disabled[inst] = true
+        inst.Enabled = false
+    end
+end
+
+local function setPerfEnabled(state)
+    if state then
+        if Perf.Enabled then
+            return
+        end
+        Perf.Enabled = true
+
+        Perf.OrigShadows = Lighting.GlobalShadows
+        Lighting.GlobalShadows = false
         pcall(function()
-            backup.shadows = Lighting.GlobalShadows
-            Lighting.GlobalShadows = false
-        end)
-        pcall(function()
-            backup.quality = settings().Rendering.QualityLevel
+            Perf.OrigQuality = settings().Rendering.QualityLevel
             settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
         end)
+
+        -- Efeitos novos (skills, golpes) também são desligados
+        local function onAdded(inst)
+            pcall(disableEffect, inst)
+        end
+        table.insert(Perf.Conns, Workspace.DescendantAdded:Connect(onAdded))
+        table.insert(Perf.Conns, Lighting.DescendantAdded:Connect(onAdded))
+
+        -- Efeitos que já existem (varre aos poucos pra não travar)
+        task.spawn(function()
+            local n = 0
+            for _, container in ipairs({ Workspace, Lighting }) do
+                for _, inst in ipairs(container:GetDescendants()) do
+                    if not Perf.Enabled then
+                        return
+                    end
+                    pcall(disableEffect, inst)
+                    n += 1
+                    if n % 400 == 0 then
+                        task.wait()
+                    end
+                end
+            end
+        end)
     else
-        local backup = Util.fpsBackup
-        if not backup then return end
-        Util.fpsBackup = nil
-        pcall(function()
-            if backup.shadows ~= nil then
-                Lighting.GlobalShadows = backup.shadows
+        Perf.Enabled = false
+
+        for _, c in ipairs(Perf.Conns) do
+            pcall(function()
+                c:Disconnect()
+            end)
+        end
+        table.clear(Perf.Conns)
+
+        for inst in pairs(Perf.Disabled) do
+            if inst.Parent then
+                pcall(function()
+                    inst.Enabled = true
+                end)
             end
-        end)
-        pcall(function()
-            if backup.quality ~= nil then
-                settings().Rendering.QualityLevel = backup.quality
-            end
-        end)
+        end
+        table.clear(Perf.Disabled)
+
+        if Perf.OrigShadows ~= nil then
+            Lighting.GlobalShadows = Perf.OrigShadows
+        end
+        if Perf.OrigQuality ~= nil then
+            pcall(function()
+                settings().Rendering.QualityLevel = Perf.OrigQuality
+            end)
+        end
+        Perf.OrigShadows, Perf.OrigQuality = nil, nil
     end
 end
 
--- Rejoin: volta pro mesmo servidor (se estiver sozinho, entra num servidor novo)
-function Util.rejoin()
-    local TeleportService = game:GetService("TeleportService")
-    notify(L("rejoining"), "refresh-cw", 3)
-    if #Players:GetPlayers() <= 1 then
-        pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
-    else
-        pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-        end)
+----------------------------------------------------------------
+-- Main: Pular pras Costas, Radar e Anti-Void
+----------------------------------------------------------------
+----- Pular pras Costas -----
+local Back = {
+    Enabled = false, -- mostra o botão flutuante
+    Distance = 4, -- quantos studs atrás do alvo você aparece
+    MaxRange = 100, -- alvo mais longe que isso = não pula
+    Cooldown = 0.35,
+    Last = 0,
+}
+
+local BackGui, BackButton
+
+-- Alvo do pulo: quem está travado no Lock On; se não tiver, o player mais perto
+local function getBackTarget()
+    local locked = LockOn.Active and LockOn.Target
+    if locked and getAlive(locked) then
+        return locked
+    end
+    return findNearestTarget()
+end
+
+local function jumpBehindTarget()
+    local now = os.clock()
+    if now - Back.Last < Back.Cooldown then
+        return
+    end
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root) or hum.Health <= 0 then
+        return
+    end
+
+    local target = getBackTarget()
+    if not target then
+        notifyOnce("back", "Pular pras Costas", "Nenhum player por perto.")
+        return
+    end
+    local _, tRoot = getAlive(target)
+    if not tRoot then
+        return
+    end
+
+    local toTarget = tRoot.Position - root.Position
+    if toTarget.Magnitude > Back.MaxRange then
+        notifyOnce("back", "Pular pras Costas", "Alvo muito longe. Aumente o alcance máximo do pulo.")
+        return
+    end
+
+    -- "Atrás" = o lado contrário de pra onde o alvo está olhando (só no plano horizontal)
+    local flat = Vector3.new(1, 0, 1)
+    local look = tRoot.CFrame.LookVector * flat
+    if look.Magnitude < 0.05 then
+        look = -(toTarget * flat)
+    end
+    if look.Magnitude < 0.05 then
+        look = Vector3.zAxis
+    end
+    local behind = -look.Unit
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { char, target.Character }
+
+    -- Parede atrás do alvo: aparece mais perto dele em vez de entrar na parede
+    local dist = Back.Distance
+    local hit = Workspace:Raycast(tRoot.Position, behind * (dist + 1.5), params)
+    if hit then
+        dist = math.max(hit.Distance - 1.5, 1.5)
+    end
+
+    -- Precisa ter chão onde vai aparecer (tenta a distância cheia e depois mais perto)
+    local pos
+    for _, factor in ipairs({ 1, 0.6, 0.3 }) do
+        local candidate = tRoot.Position + behind * math.max(dist * factor, 1.5) + Vector3.new(0, 0.5, 0)
+        if hasGroundBelow(candidate, params, 80) then
+            pos = candidate
+            break
+        end
+    end
+    if not pos then
+        notifyOnce("back", "Pular pras Costas", "Sem chão atrás do alvo.")
+        return
+    end
+
+    Back.Last = now
+    root.CFrame = CFrame.lookAt(pos, Vector3.new(tRoot.Position.X, pos.Y, tRoot.Position.Z))
+    root.AssemblyLinearVelocity = Vector3.zero
+end
+
+local function createBackGui()
+    if BackGui then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
+
+    -- Fica logo abaixo do botão do Lock On
+    BackGui, BackButton = createFloatingButton(
+        "BukBack",
+        "COSTAS",
+        math.max(vp.X - BUTTON_SIZE - 240, 0),
+        math.clamp(vp.Y * 0.5 + BUTTON_SIZE / 2 + 16, 0, math.max(vp.Y - BUTTON_SIZE, 0)),
+        jumpBehindTarget
+    )
+    BackButton.TextSize = 12
+end
+
+local function setBackEnabled(state)
+    Back.Enabled = state
+    if state then
+        createBackGui()
+    end
+    if BackGui then
+        BackGui.Enabled = state
     end
 end
 
--- Server Hop: pula pra outro servidor público que não esteja cheio
-function Util.serverHop()
-    notify(L("hop_search"), "search", 3)
-    local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId)
-        .. "/servers/Public?sortOrder=Asc&limit=100"
+----- Radar -----
+local Radar = {
+    Enabled = false,
+    Range = 150, -- alcance em studs (a borda do círculo)
+    Size = 150, -- tamanho do círculo em pixels
+    Dots = {}, -- Player -> bolinha
+}
 
-    local okGet, body = pcall(function()
+local RadarGui, RadarFrame
+local DOT_SIZE = 7
+
+local function createRadarGui()
+    if RadarGui then
+        return
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "BukRadar"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 997
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    -- O fundo é um TextButton só pra receber o toque de arrastar
+    local frame = Instance.new("TextButton")
+    frame.Name = "Radar"
+    frame.AutoButtonColor = false
+    frame.Text = ""
+    frame.BorderSizePixel = 0
+    frame.Size = UDim2.fromOffset(Radar.Size, Radar.Size)
+    frame.Position = UDim2.fromOffset(12, 70)
+    frame.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
+    frame.BackgroundTransparency = 0.35
+    frame.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = frame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 1.5
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Transparency = 0.3
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = frame
+
+    -- Círculo do meio (metade do alcance)
+    local ring = Instance.new("Frame")
+    ring.Name = "Ring"
+    ring.AnchorPoint = Vector2.new(0.5, 0.5)
+    ring.Position = UDim2.fromScale(0.5, 0.5)
+    ring.Size = UDim2.fromScale(0.5, 0.5)
+    ring.BackgroundTransparency = 1
+    ring.BorderSizePixel = 0
+    ring.Parent = frame
+    local ringCorner = Instance.new("UICorner")
+    ringCorner.CornerRadius = UDim.new(1, 0)
+    ringCorner.Parent = ring
+    local ringStroke = Instance.new("UIStroke")
+    ringStroke.Thickness = 1
+    ringStroke.Color = Color3.fromRGB(255, 255, 255)
+    ringStroke.Transparency = 0.8
+    ringStroke.Parent = ring
+
+    -- Cruz no centro
+    local function addLine(name, size)
+        local line = Instance.new("Frame")
+        line.Name = name
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.Position = UDim2.fromScale(0.5, 0.5)
+        line.Size = size
+        line.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        line.BackgroundTransparency = 0.85
+        line.BorderSizePixel = 0
+        line.Parent = frame
+    end
+    addLine("LineH", UDim2.new(1, -12, 0, 1))
+    addLine("LineV", UDim2.new(0, 1, 1, -12))
+
+    -- Você (centro) e a seta que mostra "pra frente" (a câmera sempre aponta pra cima)
+    local me = Instance.new("Frame")
+    me.Name = "Me"
+    me.AnchorPoint = Vector2.new(0.5, 0.5)
+    me.Position = UDim2.fromScale(0.5, 0.5)
+    me.Size = UDim2.fromOffset(8, 8)
+    me.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    me.BorderSizePixel = 0
+    me.ZIndex = 3
+    me.Parent = frame
+    local meCorner = Instance.new("UICorner")
+    meCorner.CornerRadius = UDim.new(1, 0)
+    meCorner.Parent = me
+
+    local north = Instance.new("TextLabel")
+    north.Name = "Front"
+    north.AnchorPoint = Vector2.new(0.5, 0)
+    north.Position = UDim2.new(0.5, 0, 0, 3)
+    north.Size = UDim2.fromOffset(12, 10)
+    north.BackgroundTransparency = 1
+    north.BorderSizePixel = 0
+    north.Font = Enum.Font.GothamBold
+    north.TextSize = 9
+    north.Text = "▲"
+    north.TextColor3 = Color3.fromRGB(255, 255, 255)
+    north.TextTransparency = 0.35
+    north.ZIndex = 3
+    north.Parent = frame
+
+    mountGui(gui)
+    makeDraggable(gui, frame, nil)
+
+    RadarGui, RadarFrame = gui, frame
+end
+
+local function getDot(plr)
+    local dot = Radar.Dots[plr]
+    if dot and dot.Parent then
+        return dot
+    end
+    if not RadarFrame then
+        return nil
+    end
+
+    dot = Instance.new("Frame")
+    dot.Name = "Dot"
+    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dot.Size = UDim2.fromOffset(DOT_SIZE, DOT_SIZE)
+    dot.BorderSizePixel = 0
+    dot.ZIndex = 2
+    dot.Visible = false
+    dot.Parent = RadarFrame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = dot
+
+    Radar.Dots[plr] = dot
+    return dot
+end
+
+local function removeDot(plr)
+    local dot = Radar.Dots[plr]
+    Radar.Dots[plr] = nil
+    destroyGui(dot)
+end
+
+local function setRadarEnabled(state)
+    Radar.Enabled = state
+    if state then
+        createRadarGui()
+    end
+    if RadarGui then
+        RadarGui.Enabled = state
+    end
+end
+
+local function setRadarSize(size)
+    Radar.Size = size
+    if RadarFrame then
+        RadarFrame.Size = UDim2.fromOffset(size, size)
+    end
+end
+
+connect(Players.PlayerRemoving, removeDot)
+
+-- Cada frame: pega a direção da câmera e põe cada player no círculo (frente = pra cima)
+connect(RunService.RenderStepped, function()
+    if not (Radar.Enabled and RadarFrame) then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    if not cam then
+        return
+    end
+
+    local look = cam.CFrame.LookVector
+    local forward = Vector3.new(look.X, 0, look.Z)
+    if forward.Magnitude < 0.05 then
+        -- câmera olhando reto pra cima/baixo: usa a direção "de cima" dela
+        local up = cam.CFrame.UpVector
+        forward = Vector3.new(up.X, 0, up.Z)
+    end
+    if forward.Magnitude < 0.01 then
+        forward = Vector3.new(0, 0, -1)
+    end
+    forward = forward.Unit
+    local right = forward:Cross(Vector3.yAxis)
+
+    local origin = getOrigin()
+    local radius = RadarFrame.AbsoluteSize.X / 2 - DOT_SIZE
+    local color = State.ESP.Color
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local _, root = getAlive(plr)
+            if root then
+                local dot = getDot(plr)
+                if dot then
+                    local offset = root.Position - origin
+                    local dx = offset:Dot(right)
+                    local dz = offset:Dot(forward)
+                    local dist = math.sqrt(dx * dx + dz * dz)
+
+                    local x, y = 0, 0
+                    if dist > 0.01 then
+                        -- passou do alcance: fica grudado na borda (mostra a direção)
+                        local k = (math.min(dist, Radar.Range) / Radar.Range) * radius / dist
+                        x, y = dx * k, -dz * k
+                    end
+
+                    local isTarget = LockOn.Active and LockOn.Target == plr
+                    local size = isTarget and DOT_SIZE + 3 or DOT_SIZE
+                    dot.Position = UDim2.new(0.5, x, 0.5, y)
+                    dot.Size = UDim2.fromOffset(size, size)
+                    dot.BackgroundColor3 = isTarget and Color3.fromRGB(255, 60, 60) or color
+                    dot.BackgroundTransparency = dist > Radar.Range and 0.55 or 0
+                    dot.Visible = true
+                end
+            else
+                local dot = Radar.Dots[plr]
+                if dot then
+                    dot.Visible = false
+                end
+            end
+        end
+    end
+end)
+
+----- Anti-Void -----
+local AntiVoid = {
+    Enabled = false,
+    FallDistance = 80, -- queda (em studs) sem chão embaixo antes de te devolver
+    LastSafe = nil, -- CFrame do último lugar onde você estava pisando em chão
+    Char = nil,
+    LastCheck = 0,
+    LastRescue = 0,
+}
+
+local voidParams = RaycastParams.new()
+voidParams.FilterType = Enum.RaycastFilterType.Exclude
+
+connect(RunService.Heartbeat, function()
+    if not AntiVoid.Enabled then
+        return
+    end
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hum and root) or hum.Health <= 0 then
+        return
+    end
+
+    -- Personagem novo (respawn): esquece o chão da vida anterior
+    if AntiVoid.Char ~= char then
+        AntiVoid.Char = char
+        AntiVoid.LastSafe = nil
+    end
+
+    -- Confere 10 vezes por segundo (mais que isso não precisa)
+    local now = os.clock()
+    if now - AntiVoid.LastCheck < 0.1 then
+        return
+    end
+    AntiVoid.LastCheck = now
+
+    -- Pisando em chão: guarda esse lugar como seguro
+    if hum.FloorMaterial ~= Enum.Material.Air then
+        AntiVoid.LastSafe = root.CFrame
+        return
+    end
+
+    local safe = AntiVoid.LastSafe
+    if not safe then
+        return
+    end
+
+    local pos = root.Position
+    -- Perto da altura em que o Roblox destrói quem cai do mapa: volta na hora
+    local belowMap = pos.Y < Workspace.FallenPartsDestroyHeight + 40
+    if not belowMap then
+        if safe.Position.Y - pos.Y < AntiVoid.FallDistance then
+            return -- ainda não caiu o bastante
+        end
+        -- Tem chão lá embaixo? Então não é vazio, é só uma queda grande: deixa cair
+        voidParams.FilterDescendantsInstances = { char }
+        if Workspace:Raycast(pos, Vector3.new(0, -2000, 0), voidParams) then
+            return
+        end
+    end
+
+    if now - AntiVoid.LastRescue < 1 then
+        return
+    end
+    AntiVoid.LastRescue = now
+
+    root.CFrame = safe + Vector3.new(0, 3, 0)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+    notifyOnce("void", "Anti-Void", "Você caiu fora do mapa. Voltei pro último chão seguro.")
+end)
+
+----- Trocar de Servidor -----
+local Hop = {
+    Mode = "Mais cheio", -- "Mais cheio" | "Mais vazio" | "Aleatório"
+    Busy = false,
+    MaxPages = 3, -- quantas páginas da lista (100 servidores cada) ele busca, no máximo
+    MaxTries = 5, -- quantos servidores tenta antes de desistir e só reentrar no jogo
+}
+
+-- GET que funciona em vários executores: game:HttpGet, ou request/http_request
+local function httpGet(url)
+    local ok, body = pcall(function()
         return game:HttpGet(url)
     end)
-    local okJson, data = false, nil
-    if okGet and type(body) == "string" then
-        okJson, data = pcall(function()
+    if ok and type(body) == "string" and #body > 0 then
+        return body
+    end
+
+    local req = (syn and syn.request) or http_request or request
+    if req then
+        local ok2, res = pcall(req, { Url = url, Method = "GET" })
+        if ok2 and type(res) == "table" and type(res.Body) == "string" and (res.StatusCode or 200) == 200 then
+            return res.Body
+        end
+    end
+    return nil
+end
+
+-- Servidores públicos com vaga, já sem o servidor onde você está, na ordem do modo escolhido.
+-- Devolve uma lista vazia se o executor não deixar buscar (ou a Roblox recusar).
+local function fetchServers()
+    local random = Hop.Mode == "Aleatório"
+    local order = (Hop.Mode == "Mais vazio") and "Asc" or "Desc" -- Desc = mais cheio primeiro
+    local want = random and 50 or Hop.MaxTries
+    local found = {}
+    local cursor = nil
+
+    for _ = 1, Hop.MaxPages do
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=%s&excludeFullGames=true&limit=100",
+            tostring(game.PlaceId),
+            order
+        )
+        if cursor then
+            url ..= "&cursor=" .. HttpService:UrlEncode(cursor)
+        end
+
+        local body = httpGet(url)
+        if not body then
+            break
+        end
+        local ok, data = pcall(function()
             return HttpService:JSONDecode(body)
         end)
-    end
-    if not (okJson and type(data) == "table" and type(data.data) == "table") then
-        notify(L("hop_fail"), "triangle-alert", 3)
-        return
-    end
-
-    local list = {}
-    for _, s in ipairs(data.data) do
-        if type(s) == "table" and s.id ~= game.JobId
-            and type(s.playing) == "number" and type(s.maxPlayers) == "number"
-            and s.playing < s.maxPlayers - 1 then
-            list[#list + 1] = s.id
+        if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
+            break
         end
-    end
-    if #list == 0 then
-        notify(L("hop_none"), "triangle-alert", 3)
-        return
-    end
 
-    local TeleportService = game:GetService("TeleportService")
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, list[math.random(1, #list)], LocalPlayer)
-    end)
-end
-
--- Copia o ID do servidor (JobId)
-function Util.copyServerId()
-    local copy = setclipboard or toclipboard or (Clipboard and Clipboard.set)
-    if type(copy) ~= "function" then
-        notify(L("no_clip"), "triangle-alert", 3)
-        return
-    end
-    if pcall(copy, tostring(game.JobId)) then
-        notify(L("copied"), "check", 2.5)
-    else
-        notify(L("no_clip"), "triangle-alert", 3)
-    end
-end
-
--- Auto Save: salva as opções a cada 20s (e ao descarregar o script)
-loop("autosave", 20, function()
-    if State.AutoSave then
-        saveConfig()
-    end
-end)
-
--- ═══════════════════════════════════════════════════════════
---  15. INTERFACE (WindUI)
---  Minimize a janela e use o botão "BUK" (botão de abrir da WindUI,
---  arrastável) para abrir de novo. No PC use também a tecla do menu
---  (Settings > Menu Key).
--- ═══════════════════════════════════════════════════════════
-local WINDUI_URLS = {
-    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
-    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
-}
-local WindUILib    = nil
-local WindUIWindow = nil
-local buildUI, Unload, destroyUI
-
-local function loadWindUI()
-    local lastErr = "no url worked"
-    for _, url in ipairs(WINDUI_URLS) do
-        local okGet, body = pcall(function()
-            return game:HttpGet(url, true)
-        end)
-        if okGet and type(body) == "string" and #body > 0 then
-            local chunk, compileErr = loadstring(body)
-            if chunk then
-                local okRun, lib = pcall(chunk)
-                if okRun and type(lib) == "table" then
-                    return lib
-                end
-                lastErr = tostring(lib)
-            else
-                lastErr = tostring(compileErr)
+        for _, server in ipairs(data.data) do
+            if
+                server.id ~= game.JobId
+                and type(server.playing) == "number"
+                and type(server.maxPlayers) == "number"
+                and server.playing < server.maxPlayers
+            then
+                table.insert(found, server)
             end
-        else
-            lastErr = tostring(body)
+        end
+
+        cursor = data.nextPageCursor
+        if type(cursor) ~= "string" or #found >= want then
+            break
         end
     end
-    error("WindUI: could not load the library (check your internet / executor HttpGet): " .. lastErr)
+
+    if random then
+        for i = #found, 2, -1 do
+            local j = math.random(i)
+            found[i], found[j] = found[j], found[i]
+        end
+    end
+    return found
 end
 
-destroyUI = function()
-    NotifyImpl = nil
-    FlingDropdown, FlingToggle = nil, nil
-
-    local win = WindUIWindow
-    WindUIWindow = nil
-    WindUILib = nil
-    if win then
-        pcall(function()
-            win:Destroy()
-        end)
-    end
-end
-
-buildUI = function()
-    destroyUI()
-
-    local WindUI = loadWindUI()
-    WindUILib = WindUI
-
-    local uiReady = false -- evita que callbacks da criação mexam no State
-
-    -- ───────────── TEMAS (Demon Slayer) ─────────────
-    local function hex(h)
-        return Color3.fromHex(h)
-    end
-    local function addTheme(def)
-        pcall(function()
-            WindUI:AddTheme(def)
-        end)
-    end
-
-    -- Tanjiro: preto e verde do haori + vermelho do hanafuda
-    addTheme({
-        Name        = "Demon Slayer",
-        Accent      = hex("#1f9d55"),
-        Dialog      = hex("#0b1a12"),
-        Outline     = hex("#86efac"),
-        Text        = hex("#ecfdf5"),
-        Placeholder = hex("#3f7a5a"),
-        Background  = hex("#070d0a"),
-        Button      = hex("#14532d"),
-        Icon        = hex("#ff6b6b"),
+-- Sem lista (ou nenhum servidor aceitou): só reentra no jogo
+local function reenterGame(reason)
+    WindUI:Notify({
+        Title = "Trocar de Servidor",
+        Content = reason .. " Reentrando no jogo...",
+        Duration = 4,
     })
-    -- Nezuko: rosa com verde do bambu
-    addTheme({
-        Name        = "Nezuko",
-        Accent      = hex("#ec4899"),
-        Dialog      = hex("#2a0a1a"),
-        Outline     = hex("#fbcfe8"),
-        Text        = hex("#fdf2f8"),
-        Placeholder = hex("#9d174d"),
-        Background  = hex("#14040c"),
-        Button      = hex("#be185d"),
-        Icon        = hex("#86efac"),
-    })
-    -- Rengoku: respiração das chamas
-    addTheme({
-        Name        = "Rengoku",
-        Accent      = hex("#f97316"),
-        Dialog      = hex("#2a0f05"),
-        Outline     = hex("#fed7aa"),
-        Text        = hex("#fff7ed"),
-        Placeholder = hex("#9a3412"),
-        Background  = hex("#140603"),
-        Button      = hex("#c2410c"),
-        Icon        = hex("#facc15"),
-    })
-    -- Zenitsu: respiração do trovão
-    addTheme({
-        Name        = "Zenitsu",
-        Accent      = hex("#facc15"),
-        Dialog      = hex("#1f1a05"),
-        Outline     = hex("#fef08a"),
-        Text        = hex("#fefce8"),
-        Placeholder = hex("#a16207"),
-        Background  = hex("#0f0c02"),
-        Button      = hex("#a16207"),
-        Icon        = hex("#fde047"),
-    })
-
-    -- tema salvo (se o nome não existir mais na WindUI, volta pro Dark)
-    local startTheme = "Dark"
+    task.wait(1)
     pcall(function()
-        local themes = WindUI:GetThemes()
-        if type(themes) == "table" and themes[State.Theme] then
-            startTheme = State.Theme
-        end
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
-    State.Theme = startTheme
+end
 
-    -- Avisos (usa as notificações da WindUI; os ícones são nomes do Lucide)
-    NotifyImpl = function(text, icon, duration)
+local function hopServer()
+    if Hop.Busy then
+        notifyOnce("hop", "Trocar de Servidor", "Já estou trocando, aguarde.")
+        return
+    end
+    Hop.Busy = true
+
+    task.spawn(function()
         WindUI:Notify({
-            Title    = "Buk",
-            Content  = tostring(text),
-            Icon     = icon or "info",
-            Duration = duration or 3,
+            Title = "Trocar de Servidor",
+            Content = "Procurando servidor (" .. string.lower(Hop.Mode) .. ")...",
+            Duration = 3,
         })
-    end
 
-    -- ───────────── JANELA ─────────────
-    local Window = WindUI:CreateWindow({
-        Title        = "Buk",
-        Author       = "by Linesketon02",
-        Folder       = "Buk",
-        Icon         = "flame",
-        Theme        = startTheme,
-        Transparent  = State.Transparent,
-        Size         = UDim2.fromOffset(500, 330),
-        SideBarWidth = 170,
-    })
-    if not Window then
-        error("WindUI: could not create the window (another WindUI window may already be open)")
-    end
-    WindUIWindow = Window
+        local ok, servers = pcall(fetchServers)
+        if not ok or #servers == 0 then
+            reenterGame("Não consegui a lista de servidores.")
+            task.wait(10) -- se o teleporte falhar, libera o botão de novo
+            Hop.Busy = false
+            return
+        end
 
-    -- Botão de abrir com o nome BUK (arrastável, aparece em PC e celular)
-    pcall(function()
-        Window:EditOpenButton({
-            Title      = "BUK",
-            Color      = ColorSequence.new(Color3.fromHex("#1f9d55"), Color3.fromHex("#e03a3e")),
-            Enabled    = true,
-            Draggable  = true,
-            OnlyMobile = false,
-        })
-    end)
-    pcall(function()
-        Window:SetToggleKey(State.MenuKey)
-    end)
-
-    local function newTab(titleKey, icon)
-        return Window:Tab({
-            Title = L(titleKey),
-            Icon  = icon,
-        })
-    end
-
-    -- ordem das abas no menu (o ícone da Main é "house": o nome antigo "home" não existe mais no Lucide)
-    local TabMain     = newTab("tab_main", "house")
-    local TabPlayer   = newTab("tab_player", "user")
-    local TabFarm     = newTab("tab_farm", "coins")
-    local TabVisuals  = newTab("tab_visuals", "eye")
-    local TabPick     = newTab("tab_pick", "crosshair")
-    local TabSheriff  = newTab("tab_sheriff", "target")
-    local TabTroll    = newTab("tab_troll", "zap")
-    local TabExtras   = newTab("tab_extras", "sparkles")
-    local TabSettings = newTab("tab_settings", "settings")
-
-    -- ───────────── ajudantes ─────────────
-    -- Seção da WindUI (se a versão não tiver seção com elementos, usa a própria aba)
-    local function newSection(tab, title, opened)
-        local ok, sec = pcall(function()
-            return tab:Section({ Title = title, Opened = opened ~= false })
+        -- Se o servidor encher antes de você entrar, o teleporte falha: tenta o próximo da lista
+        local failed = false
+        local conn = TeleportService.TeleportInitFailed:Connect(function()
+            failed = true
         end)
-        if ok and type(sec) == "table" and type(sec.Toggle) == "function" then
-            return sec
-        end
-        return tab
-    end
 
-    local function addToggle(sec, title, key, onChange)
-        return sec:Toggle({
-            Title    = title,
-            Value    = State[key] == true,
-            Default  = State[key] == true,
-            Callback = function(v)
-                if not uiReady then return end
-                State[key] = v and true or false
-                if onChange then onChange(v) end
-            end,
-        })
-    end
-
-    local function addSlider(sec, title, key, min, max)
-        return sec:Slider({
-            Title    = title,
-            Step     = 1,
-            Value    = { Min = min, Max = max, Default = math.clamp(State[key], min, max) },
-            Callback = function(v)
-                if not uiReady then return end
-                State[key] = tonumber(v) or State[key]
-            end,
-        })
-    end
-
-    -- ───────────── MAIN ─────────────
-    local XraySec = newSection(TabMain, L("sec_xray"))
-    addToggle(XraySec, L("xray"), "XRay")
-    addSlider(XraySec, L("xray_level"), "XRayLevel", 20, 90)
-
-    -- ───────────── PLAYER ─────────────
-    local MoveSec = newSection(TabPlayer, L("sec_move"))
-    addToggle(MoveSec, L("cframe"), "CFrameOn")
-    addSlider(MoveSec, L("cframe_speed"), "CFrameSpeed", 5, 100)
-    addToggle(MoveSec, L("inf_jump"), "InfJump")
-    addToggle(MoveSec, L("noclip"), "Noclip")
-
-    local ProtectSec = newSection(TabPlayer, L("sec_protect"))
-    addToggle(ProtectSec, L("anti_fling"), "AntiFling", function(v)
-        if not v then
-            restoreBackup(antiBackup)
-        end
-    end)
-
-    -- ───────────── AUTO FARM ─────────────
-    -- (o Auto Farm nunca liga sozinho na próxima execução)
-    local FarmSec = newSection(TabFarm, L("sec_farm"))
-    addToggle(FarmSec, L("farm_on"), "FarmOn")
-    addSlider(FarmSec, L("farm_speed"), "FarmSpeed", 25, 30)
-    addToggle(FarmSec, L("farm_under"), "FarmUnder")
-    addSlider(FarmSec, L("farm_limit"), "FarmLimit", 10, 60)
-    addToggle(FarmSec, L("farm_safe"), "FarmSafe")
-    addToggle(FarmSec, L("farm_reset"), "FarmReset")
-
-    -- ───────────── VISUALS (ESP) ─────────────
-    local NameSec = newSection(TabVisuals, L("sec_name"))
-    addToggle(NameSec, L("esp_name"), "EspName")
-
-    local RolesSec = newSection(TabVisuals, L("sec_roles"))
-    addToggle(RolesSec, L("role_inn"),  "RoleInnocent")
-    addToggle(RolesSec, L("role_sher"), "RoleSheriff")
-    addToggle(RolesSec, L("role_murd"), "RoleMurderer")
-
-    local ItemsSec = newSection(TabVisuals, L("sec_items"))
-    addToggle(ItemsSec, L("gun_drop"),      "GunDrop")
-    addToggle(ItemsSec, L("arrow_murder"),  "ArrowMurder")
-    addToggle(ItemsSec, L("arrow_sheriff"), "ArrowSheriff")
-
-    -- ───────────── WEAPON ─────────────
-    local PickSec = newSection(TabPick, L("sec_pick"))
-    addToggle(PickSec, L("pick_auto"), "PickAuto")
-    addToggle(PickSec, L("pick_screen"), "PickButton", setPickButtonVisible)
-
-    local PickPcSec = newSection(TabPick, L("sec_pick_pc"))
-    addToggle(PickPcSec, L("pick_key_on"), "PickKeyOn")
-    PickPcSec:Keybind({
-        Title    = L("pick_key"),
-        Value    = State.PickKey.Name,
-        Callback = function(v) -- quem pega a arma é o próprio script
-            if not uiReady then return end
-            local kc = toKeyCode(v)
-            if kc then
-                State.PickKey = kc
-            end
-        end,
-    })
-
-    -- ───────────── AIMBOT MM2 ─────────────
-    local MagicSec = newSection(TabSheriff, L("sec_magic"))
-    addToggle(MagicSec, L("magic"), "MagicBullet", function(v)
-        if v then
-            if not installAimHook() then
-                notify(L("no_hook"), "triangle-alert", 4)
-            end
-        else
-            magicAim = nil
-        end
-    end)
-    MagicSec:Dropdown({
-        Title    = L("magic_part"),
-        Values   = { L("part_torso"), L("part_head") },
-        Value    = (State.AimPart == "Head") and L("part_head") or L("part_torso"),
-        Multi    = false,
-        Callback = function(option)
-            if not uiReady then return end
-            if type(option) == "table" then option = option[1] end
-            if option == L("part_head") then
-                State.AimPart = "Head"
-            elseif option == L("part_torso") then
-                State.AimPart = "Torso"
-            end
-        end,
-    })
-    addToggle(MagicSec, L("magic_predict"), "AimPredict")
-    addToggle(MagicSec, L("wall_shot"), "WallShot", function(v)
-        if v then
-            if not installAimHook() then
-                notify(L("no_hook"), "triangle-alert", 4)
-            end
-        else
-            Aim.clearTags()
-        end
-    end)
-
-
-    -- ───────────── TROLL ─────────────
-    -- 1) Fling (liga/desliga)   2) Escolher o player   3) Velocidade sempre no máximo
-    local FlingSec = newSection(TabTroll, L("sec_fling"))
-
-    local flingToggleObj = addToggle(FlingSec, L("fling"), "Fling", function(v)
-        if v then
-            local ok, reason = startFling()
-            if not ok then
-                State.Fling = false
-                local key = (reason == "dead" and "fling_dead")
-                    or (reason == "tdead" and "fling_tdead")
-                    or (reason == "norole" and "fling_norole")
-                    or "fling_notarget"
-                notify(L(key), "triangle-alert", 3)
-                task.defer(function()
-                    if FlingToggle then
-                        FlingToggle:Set(false)
-                    end
-                end)
-            end
-        else
-            stopFling()
-        end
-    end)
-    -- o resto do script chama FlingToggle:Set(false) quando o Fling termina sozinho
-    FlingToggle = {
-        Set = function(_, v)
-            pcall(function()
-                flingToggleObj:Set(v and true or false)
+        local success = false
+        for i = 1, math.min(#servers, Hop.MaxTries) do
+            local server = servers[i]
+            failed = false
+            local started = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
             end)
-        end,
-    }
-
-    local flingGuard = { busy = false }
-    local flingNames = flingValues()
-    local flingStart = (State.FlingTarget and table.find(flingNames, State.FlingTarget)) and State.FlingTarget or nil
-    local flingObj = FlingSec:Dropdown({
-        Title    = L("fling_player"),
-        Values   = flingNames,
-        Value    = flingStart,
-        Multi    = false,
-        Callback = function(option)
-            if flingGuard.busy then return end
-            if type(option) == "table" then option = option[1] end
-            if type(option) == "string" then
-                State.FlingTarget = option
-            end
-        end,
-    })
-    FlingDropdown = {
-        -- troca a lista mantendo o jogador escolhido (mesmo que ele tenha saído)
-        Refresh = function(_, values)
-            local keep = State.FlingTarget
-            local list = {}
-            for _, v in ipairs(values) do
-                list[#list + 1] = v
-            end
-            if keep and not table.find(list, keep) then
-                list[#list + 1] = keep
-            end
-
-            flingGuard.busy = true
-            pcall(function()
-                flingObj:Refresh(list)
-            end)
-            if keep then
-                pcall(function()
-                    flingObj:Select(keep)
-                end)
-            end
-            flingGuard.busy = false
-            State.FlingTarget = keep
-        end,
-    }
-
-    -- ───────────── EXTRAS ─────────────
-    local LightSec = newSection(TabExtras, L("sec_light"))
-    addToggle(LightSec, L("fullbright"), "Fullbright")
-    addToggle(LightSec, L("no_fog"), "NoFog")
-
-    local CamSec = newSection(TabExtras, L("sec_camera"))
-    addToggle(CamSec, L("fov_on"), "FovOn")
-    addSlider(CamSec, L("fov"), "Fov", 70, 120)
-    addToggle(CamSec, L("unlock_zoom"), "UnlockZoom")
-
-    local WalkSec = newSection(TabExtras, L("sec_walk"))
-    addToggle(WalkSec, L("walk_on"), "WalkOn")
-    addSlider(WalkSec, L("walk_speed"), "WalkSpeed", 16, 50)
-
-    -- ───────────── SETTINGS ─────────────
-    local MenuSec = newSection(TabSettings, L("sec_menu"))
-    MenuSec:Keybind({
-        Title    = L("menu_key"),
-        Value    = State.MenuKey.Name,
-        Callback = function(v)
-            if not uiReady then return end
-            local kc = toKeyCode(v)
-            if kc then
-                State.MenuKey = kc
-                pcall(function()
-                    Window:SetToggleKey(kc)
-                end)
-            end
-        end,
-    })
-
-    -- Unload: toque duas vezes (evita fechar sem querer)
-    local unloadArmed = false
-    MenuSec:Button({
-        Title    = L("unload_btn"),
-        Callback = function()
-            if unloadArmed then
-                Unload()
-                return
-            end
-            unloadArmed = true
-            notify(L("close_confirm"), "triangle-alert", 2.5)
-            task.delay(3, function()
-                unloadArmed = false
-            end)
-        end,
-    })
-
-    local LookSec = newSection(TabSettings, L("sec_look"))
-    local themeNames = {}
-    pcall(function()
-        for name in pairs(WindUI:GetThemes()) do
-            themeNames[#themeNames + 1] = name
-        end
-    end)
-    table.sort(themeNames)
-    if #themeNames > 0 then
-        LookSec:Dropdown({
-            Title    = L("theme"),
-            Values   = themeNames,
-            Value    = State.Theme,
-            Multi    = false,
-            Callback = function(option)
-                if not uiReady then return end
-                if type(option) == "table" then option = option.Title or option[1] end
-                if type(option) == "string" then
-                    State.Theme = option
-                    pcall(function()
-                        WindUI:SetTheme(option)
-                    end)
+            if started then
+                local t0 = os.clock()
+                while not failed and os.clock() - t0 < 8 do
+                    task.wait(0.25)
                 end
-            end,
-        })
-    end
-    addToggle(LookSec, L("transparent"), "Transparent", function(v)
-        pcall(function()
-            Window:ToggleTransparency(v)
-        end)
-    end)
-    addToggle(LookSec, L("notifs"), "Notify")
-
-    local CfgSec = newSection(TabSettings, L("sec_config"))
-    addToggle(CfgSec, L("autosave"), "AutoSave")
-    CfgSec:Button({
-        Title    = L("save_btn"),
-        Callback = function()
-            if not Compat.files then
-                notify(L("no_files"), "triangle-alert", 3)
-                return
-            end
-            if saveConfig() then
-                notify(L("saved_text"), "save", 2.5)
-            else
-                notify(L("save_fail_text"), "triangle-alert", 3)
-            end
-        end,
-    })
-    CfgSec:Button({
-        Title    = L("delete_btn"),
-        Callback = function()
-            if not (Compat.files and type(delfile) == "function") then
-                notify(L("no_files"), "triangle-alert", 3)
-                return
-            end
-            local ok = pcall(function()
-                if isfile(CONFIG_FILE) then
-                    delfile(CONFIG_FILE)
+                if not failed then
+                    success = true -- sem erro em 8s: o teleporte está acontecendo
+                    break
                 end
-            end)
-            if ok then
-                notify(L("deleted_text"), "trash-2", 3)
-            else
-                notify(L("save_fail_text"), "triangle-alert", 3)
             end
-        end,
-    })
+        end
+        conn:Disconnect()
 
-    local UtilSec = newSection(TabSettings, L("sec_util"))
-    addToggle(UtilSec, L("anti_afk"), "AntiAFK", Util.setAntiAfk)
-    addToggle(UtilSec, L("fps_boost"), "FpsBoost", Util.setFpsBoost)
-
-    local SrvSec = newSection(TabSettings, L("sec_server"))
-    SrvSec:Button({
-        Title    = L("rejoin"),
-        Callback = function()
-            task.spawn(Util.rejoin)
-        end,
-    })
-    SrvSec:Button({
-        Title    = L("hop"),
-        Callback = function()
-            task.spawn(Util.serverHop)
-        end,
-    })
-    SrvSec:Button({
-        Title    = L("copy_id"),
-        Callback = function()
-            Util.copyServerId()
-        end,
-    })
-
-    pcall(function()
-        TabMain:Select()
+        if not success then
+            reenterGame("Os servidores encheram ou o teleporte foi bloqueado.")
+            task.wait(10)
+        end
+        Hop.Busy = false
     end)
-
-    uiReady = true
 end
 
--- ═══════════════════════════════════════════════════════════
---  16. FINALIZAÇÃO
--- ═══════════════════════════════════════════════════════════
-Unload = function()
-    if not alive then return end
-    if State.AutoSave then pcall(saveConfig) end
-    alive = false
-    pcall(Util.setAntiAfk, false)
-    pcall(Util.setFpsBoost, false)
-    pcall(Farm.release) -- sobe de volta pra superfície se estava embaixo do mapa
-    magicAim   = nil
-    forcedAim  = nil
-    Aim.active = false
-    pcall(Aim.clearTags) -- devolve as peças que viraram "atravessáveis"
-    for _, fn in ipairs(Extra.restore) do -- X-Ray, Lighting, FOV, Zoom e Walk Speed voltam ao normal
-        pcall(fn)
+-- Pede confirmação antes (um toque sem querer te tiraria da partida)
+local function confirmHop()
+    local shown = pcall(function()
+        WindUI:Popup({
+            Title = "Trocar de Servidor",
+            Content = "Você vai sair desta partida e entrar em outro servidor ("
+                .. string.lower(Hop.Mode)
+                .. "). Continuar?",
+            Icon = "server",
+            Buttons = {
+                { Title = "Cancelar", Variant = "Secondary", Callback = function() end },
+                { Title = "Trocar", Variant = "Primary", Callback = hopServer },
+            },
+        })
+    end)
+    if not shown then
+        hopServer() -- se o popup não abrir nesta versão do WindUI, troca direto
     end
-    State.Fling = false -- o loop do Fling percebe, volta pra origem e termina
-
-    for _, c in ipairs(connections) do
-        pcall(function() c:Disconnect() end)
-    end
-
-    -- devolve a colisão original (Noclip e Anti-Fling)
-    pcall(function() restoreBackup(noclipBackup) end)
-    pcall(function() restoreBackup(antiBackup) end)
-
-    for player in pairs(roleHighlights) do
-        removePlayer(player)
-    end
-
-    pcall(function() ArrowGui:Destroy() end)
-    pcall(function() PickGui:Destroy() end)
-    pcall(function() HighlightFolder:Destroy() end)
-    pcall(destroyUI)
-
-    genv.BukUnload = nil
 end
 
-genv.BukUnload = function()
-    Unload()
-    pcall(destroyUI)
+----------------------------------------------------------------
+-- Mod: Câmera (FOV travado + câmera longe travada)
+----------------------------------------------------------------
+local FOV = {
+    Enabled = false,
+    Value = 100,
+    Original = nil, -- FOV que o jogo usava antes de ligar
+    Watch = nil, -- conexão que desfaz qualquer mudança de FOV na hora
+}
+
+local CamLock = {
+    Enabled = false,
+    Distance = 50,
+    OriginalMax = nil,
+    OriginalMin = nil,
+}
+
+local function applyFOV()
+    if not FOV.Enabled then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    if cam and cam.FieldOfView ~= FOV.Value then
+        cam.FieldOfView = FOV.Value
+    end
 end
 
--- Abre o menu (se der erro, mostra o motivo na tela)
-local okBuild, errBuild = xpcall(function()
-    buildUI()
-end, function(e)
-    return debug.traceback(tostring(e), 2)
+-- Min = Max = distância: o zoom (pinça/scroll) não muda mais a distância da câmera
+local function lockZoomNow()
+    local d = CamLock.Distance
+    if LocalPlayer.CameraMaxZoomDistance == d and LocalPlayer.CameraMinZoomDistance == d then
+        return
+    end
+    if d >= LocalPlayer.CameraMaxZoomDistance then
+        LocalPlayer.CameraMaxZoomDistance = d
+        LocalPlayer.CameraMinZoomDistance = d
+    else
+        LocalPlayer.CameraMinZoomDistance = d
+        LocalPlayer.CameraMaxZoomDistance = d
+    end
+end
+
+local function applyCamLock()
+    if CamLock.Enabled then
+        pcall(lockZoomNow)
+    end
+end
+
+-- Vigia o FOV da câmera: se o Roblox ou o jogo mudar, volta no mesmo instante
+local function watchFOV()
+    if FOV.Watch then
+        FOV.Watch:Disconnect()
+        FOV.Watch = nil
+    end
+    local cam = Workspace.CurrentCamera
+    if FOV.Enabled and cam then
+        FOV.Watch = cam:GetPropertyChangedSignal("FieldOfView"):Connect(applyFOV)
+    end
+end
+
+local function setFOVEnabled(state)
+    local cam = Workspace.CurrentCamera
+    if state then
+        if cam and FOV.Original == nil then
+            FOV.Original = cam.FieldOfView
+        end
+        FOV.Enabled = true
+        watchFOV()
+        applyFOV()
+    else
+        FOV.Enabled = false
+        watchFOV() -- só desconecta
+        if cam and FOV.Original then
+            cam.FieldOfView = FOV.Original
+        end
+        FOV.Original = nil
+    end
+end
+
+local function setCamLockEnabled(state)
+    if state then
+        if CamLock.OriginalMax == nil then
+            CamLock.OriginalMax = LocalPlayer.CameraMaxZoomDistance
+            CamLock.OriginalMin = LocalPlayer.CameraMinZoomDistance
+        end
+        CamLock.Enabled = true
+        applyCamLock()
+    else
+        CamLock.Enabled = false
+        if CamLock.OriginalMax then
+            pcall(function()
+                LocalPlayer.CameraMinZoomDistance = CamLock.OriginalMin
+                LocalPlayer.CameraMaxZoomDistance = CamLock.OriginalMax
+            end)
+        end
+        CamLock.OriginalMax, CamLock.OriginalMin = nil, nil
+    end
+end
+
+-- Câmera atravessa parede: troca o modo de oclusão da câmera padrão do Roblox de "Zoom"
+-- (puxa a câmera pra perto quando tem parede) pra "Invisicam" (a parede fica transparente).
+-- Só funciona se o jogo usar o PlayerModule/câmera padrão; em câmera própria não muda nada.
+local WallCam = {
+    Enabled = false,
+    Original = nil, -- modo que o jogo usava antes de ligar
+}
+
+local function wallCamNow()
+    local mode = Enum.DevCameraOcclusionMode.Invisicam
+    if LocalPlayer.DevCameraOcclusionMode ~= mode then
+        LocalPlayer.DevCameraOcclusionMode = mode
+    end
+end
+
+local function applyWallCam()
+    if WallCam.Enabled then
+        pcall(wallCamNow) -- confere todo frame: se o jogo voltar o modo, a gente põe de novo
+    end
+end
+
+local function setWallCamEnabled(state)
+    if state then
+        if WallCam.Original == nil then
+            WallCam.Original = LocalPlayer.DevCameraOcclusionMode
+        end
+        WallCam.Enabled = true
+        applyWallCam()
+    else
+        WallCam.Enabled = false
+        if WallCam.Original ~= nil then
+            pcall(function()
+                LocalPlayer.DevCameraOcclusionMode = WallCam.Original
+            end)
+        end
+        WallCam.Original = nil
+    end
+end
+
+-- Roda por último no frame (prioridade máxima): nada consegue passar por cima
+pcall(function()
+    RunService:UnbindFromRenderStep("BukFOV")
+end)
+RunService:BindToRenderStep("BukFOV", Enum.RenderPriority.Last.Value, function()
+    applyFOV()
+    applyCamLock()
+    applyWallCam()
+    applyBright()
 end)
 
-if okBuild then
-    -- aplica as opções carregadas do arquivo que têm efeito imediato
-    setPickButtonVisible(State.PickButton)
-    if State.AntiAFK then Util.setAntiAfk(true) end
-    if State.FpsBoost then Util.setFpsBoost(true) end
-    if State.MagicBullet or State.WallShot then
-        pcall(installAimHook)
+-- Se o jogo trocar a câmera, passa a vigiar a nova
+connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+    watchFOV()
+    applyFOV()
+end)
+
+----------------------------------------------------------------
+-- Unload
+----------------------------------------------------------------
+local function Unload()
+    State.CFrameSpeed = false
+    LockOn.Enabled = false
+    LockOn.Active = false
+    LockOn.Target = nil
+    LockOn.AutoSwitch = false
+    Combat.FaceTarget = false
+    Combat.Dodge.Enabled = false
+    setFOVEnabled(false)
+    setBrightEnabled(false)
+    setPerfEnabled(false)
+    setCamLockEnabled(false)
+    setWallCamEnabled(false)
+    Back.Enabled = false
+    Radar.Enabled = false
+    AntiVoid.Enabled = false
+    destroyGui(BackGui)
+    BackGui, BackButton = nil, nil
+    destroyGui(SwitchGui)
+    SwitchGui, SwitchButton = nil, nil
+    destroyGui(RadarGui)
+    RadarGui, RadarFrame = nil, nil
+    table.clear(Radar.Dots)
+    pcall(function()
+        RunService:UnbindFromRenderStep("BukFOV")
+    end)
+    pcall(function()
+        RunService:UnbindFromRenderStep("BukLockOn")
+    end)
+    if LockGui then
+        pcall(function()
+            LockGui:Destroy()
+        end)
+        LockGui = nil
+        LockButton = nil
     end
-    notify(L("loaded"), "check", 4)
-else
-    showError(errBuild)
+    for _, key in ipairs({ "Name", "Health", "BoxCorner" }) do
+        State.ESP[key] = false
+    end
+
+    for _, c in ipairs(Connections) do
+        pcall(function()
+            c:Disconnect()
+        end)
+    end
+    table.clear(Connections)
+
+    for plr in pairs(ESPObjects) do
+        removeESP(plr)
+    end
+
+    if Window then
+        pcall(function()
+            Window:Destroy()
+        end)
+    end
+
+    env.BukHub = nil
 end
 
+env.BukHub = { Unload = Unload }
+
+----------------------------------------------------------------
+-- Temas
+----------------------------------------------------------------
+-- Darker: visual padrão do WindUI (Dark), só que mais escuro
+WindUI:AddTheme({
+    Name = "Darker",
+
+    Accent = Color3.fromHex("#0d0d0f"),
+    Dialog = Color3.fromHex("#0a0a0a"),
+    Outline = Color3.fromHex("#FFFFFF"),
+    Text = Color3.fromHex("#FFFFFF"),
+    Placeholder = Color3.fromHex("#6b6b6b"),
+    Background = Color3.fromHex("#050505"),
+    Button = Color3.fromHex("#3f3f46"),
+    Icon = Color3.fromHex("#a1a1aa"),
+})
+
+-- Demon Slayer (opcional, escolha em Settings > Aparência)
+WindUI:AddTheme({
+    Name = "Demon Slayer",
+
+    Accent = Color3.fromHex("#10291d"),
+    Dialog = Color3.fromHex("#0a1610"),
+    Outline = Color3.fromHex("#e63946"),
+    Text = Color3.fromHex("#f1f5ee"),
+    Placeholder = Color3.fromHex("#7c8f84"),
+    Background = Color3.fromHex("#070d0a"),
+    Button = Color3.fromHex("#1f5c3a"),
+    Icon = Color3.fromHex("#ff5a68"),
+    Toggle = Color3.fromHex("#e63946"),
+    Slider = Color3.fromHex("#e63946"),
+})
+
+----------------------------------------------------------------
+-- Janela
+----------------------------------------------------------------
+WindUI.TransparencyValue = 0.25
+
+local WINDOW_W, WINDOW_H = 580, 460
+
+-- Janela sólida por padrão: com transparência, o jogo (personagens, objetos) aparecia
+-- "fantasma" por trás do menu e atrapalhava a leitura. Dá pra ligar em Settings > Aparência.
+Window = WindUI:CreateWindow({
+    Title = "Buk",
+    Author = "Created by Line",
+    Folder = "Buk",
+    Icon = "swords",
+    Theme = "Darker",
+    Transparent = false,
+    Size = UDim2.fromOffset(WINDOW_W, WINDOW_H),
+    ToggleKey = Enum.KeyCode.RightShift,
+})
+
+if not Window then
+    return
+end
+
+-- O WindUI calcula o tamanho (escala) da janela só uma vez, na hora que ela abre. Se a tela
+-- ainda estava mudando nesse momento (jogo carregando, celular girando), a janela fica grande
+-- ou pequena demais e bugada. Aqui a escala é recalculada sempre que o tamanho da tela muda.
+local function fitWindow()
+    if not Window or Window.IsFullscreen then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize
+    if not vp or vp.X < 100 or vp.Y < 100 then
+        return
+    end
+    local scale = math.clamp(math.min((vp.X - 80) / WINDOW_W, (vp.Y - 80) / WINDOW_H), 0.3, 1)
+    local current = Window:GetUIScale() or 1
+    if math.abs(scale - current) > 0.05 then
+        Window:SetUIScale(scale)
+    end
+end
+
+local viewportConn
+local function watchViewport()
+    if viewportConn then
+        viewportConn:Disconnect()
+        viewportConn = nil
+    end
+    local cam = Workspace.CurrentCamera
+    if cam then
+        viewportConn = connect(cam:GetPropertyChangedSignal("ViewportSize"), function()
+            pcall(fitWindow)
+        end)
+    end
+end
+
+watchViewport()
+connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+    watchViewport()
+    pcall(fitWindow)
+end)
+task.delay(1, function()
+    pcall(fitWindow)
+end)
+
+-- Config (salvar/carregar configurações)
+do
+    local CM = Window.ConfigManager
+    local ok, result = pcall(function()
+        if CM.Config then
+            return CM:Config("Buk_v2")
+        end
+        return CM:CreateConfig("Buk_v2")
+    end)
+    if ok then
+        Config = result
+    end
+end
+
+----------------------------------------------------------------
+-- 1. Main (Full Bright, FPS Boost)
+----------------------------------------------------------------
+local MainTab = Window:Tab({
+    Title = "Main",
+    Icon = "house",
+})
+
+MainTab:Toggle({
+    Title = "Full Bright",
+    Desc = "Clareia o mapa e tira a névoa pra você enxergar tudo, até nos lugares escuros.",
+    Flag = "main_fullbright",
+    Value = false,
+    Callback = function(state)
+        setBrightEnabled(state)
+    end,
+})
+
+MainTab:Toggle({
+    Title = "FPS Boost",
+    Desc = "Desliga sombras, efeitos e partículas pra ganhar FPS no celular.",
+    Flag = "main_fps_boost",
+    Value = false,
+    Callback = function(state)
+        setPerfEnabled(state)
+    end,
+})
+
+----- Pular pras Costas -----
+local BackSection = MainTab:Section({ Title = "Pular pras Costas", Opened = true })
+
+BackSection:Toggle({
+    Title = "Botão Pular Costas",
+    Desc = "Mostra um botão flutuante. Toque nele pra aparecer atrás do alvo do Lock On (ou do player mais perto).",
+    Flag = "back_button",
+    Value = false,
+    Callback = function(state)
+        setBackEnabled(state)
+    end,
+})
+
+BackSection:Button({
+    Title = "Pular pras Costas",
+    Desc = "Faz o pulo agora, direto do menu (mesmo alvo do botão flutuante).",
+    Icon = "zap",
+    Callback = function()
+        jumpBehindTarget()
+    end,
+})
+
+BackSection:Slider({
+    Title = "Distância atrás do alvo",
+    Flag = "back_distance",
+    Step = 1,
+    Value = { Min = 2, Max = 10, Default = 4 },
+    Callback = function(value)
+        Back.Distance = value
+    end,
+})
+
+BackSection:Slider({
+    Title = "Alcance máximo do pulo",
+    Desc = "Se o alvo estiver mais longe que isso, o pulo não acontece.",
+    Flag = "back_max_range",
+    Step = 10,
+    Value = { Min = 10, Max = 300, Default = 100 },
+    Callback = function(value)
+        Back.MaxRange = value
+    end,
+})
+
+----- Radar -----
+local RadarSection = MainTab:Section({ Title = "Radar", Opened = true })
+
+RadarSection:Toggle({
+    Title = "Radar",
+    Desc = "Mini-mapa redondo com os players por perto. Gira junto com a sua câmera (frente = pra cima). Dá pra arrastar.",
+    Flag = "radar_enabled",
+    Value = false,
+    Callback = function(state)
+        setRadarEnabled(state)
+    end,
+})
+
+RadarSection:Slider({
+    Title = "Alcance do Radar",
+    Desc = "Distância até a borda do círculo. Quem está mais longe fica meio apagado na borda.",
+    Flag = "radar_range",
+    Step = 10,
+    Value = { Min = 50, Max = 500, Default = 150 },
+    Callback = function(value)
+        Radar.Range = value
+    end,
+})
+
+RadarSection:Slider({
+    Title = "Tamanho do Radar",
+    Flag = "radar_size",
+    Step = 10,
+    Value = { Min = 100, Max = 220, Default = 150 },
+    Callback = function(value)
+        setRadarSize(value)
+    end,
+})
+
+----- Anti-Void -----
+local VoidSection = MainTab:Section({ Title = "Anti-Void", Opened = true })
+
+VoidSection:Toggle({
+    Title = "Anti-Void",
+    Desc = "Se você cair fora do mapa, volta pro último chão em que pisou, antes de morrer.",
+    Flag = "antivoid_enabled",
+    Value = false,
+    Callback = function(state)
+        AntiVoid.Enabled = state
+        if not state then
+            AntiVoid.LastSafe = nil
+        end
+    end,
+})
+
+VoidSection:Slider({
+    Title = "Queda sem chão (studs)",
+    Desc = "Se você cair mais que isso e não tiver chão embaixo, volta. Menor = volta mais rápido.",
+    Flag = "antivoid_fall",
+    Step = 10,
+    Value = { Min = 40, Max = 300, Default = 80 },
+    Callback = function(value)
+        AntiVoid.FallDistance = value
+    end,
+})
+
+----- Trocar de Servidor -----
+local HopSection = MainTab:Section({ Title = "Servidor", Opened = true })
+
+HopSection:Dropdown({
+    Title = "Servidor de destino",
+    Desc = "Mais cheio = o servidor com mais gente que ainda tem vaga.",
+    Values = { "Mais cheio", "Mais vazio", "Aleatório" },
+    Value = "Mais cheio",
+    Flag = "hop_mode",
+    Callback = function(selected)
+        Hop.Mode = selected
+    end,
+})
+
+HopSection:Button({
+    Title = "Trocar de Servidor",
+    Desc = "Te leva pra outro servidor do jogo. Se o seu executor não deixar buscar a lista de servidores, só reentra no jogo.",
+    Icon = "server",
+    Callback = function()
+        confirmHop()
+    end,
+})
+
+----------------------------------------------------------------
+-- 2. Player (CFrame)
+----------------------------------------------------------------
+local PlayerTab = Window:Tab({
+    Title = "Player",
+    Icon = "user",
+})
+
+PlayerTab:Toggle({
+    Title = "CFrame Speed",
+    Flag = "cframe_speed",
+    Value = false,
+    Callback = function(state)
+        State.CFrameSpeed = state
+    end,
+})
+
+PlayerTab:Slider({
+    Title = "Velocidade",
+    Flag = "cframe_speed_value",
+    Step = 1,
+    Value = { Min = 1, Max = 300, Default = 30 },
+    Callback = function(value)
+        State.SpeedValue = value
+    end,
+})
+
+----------------------------------------------------------------
+-- 3. Esp
+----------------------------------------------------------------
+local EspTab = Window:Tab({
+    Title = "Esp",
+    Icon = "eye",
+})
+
+EspTab:Toggle({
+    Title = "Esp Name",
+    Flag = "esp_name",
+    Value = false,
+    Callback = function(state)
+        State.ESP.Name = state
+    end,
+})
+
+EspTab:Toggle({
+    Title = "Esp Health",
+    Desc = "Mostra a vida no formato atual/máxima",
+    Flag = "esp_health",
+    Value = false,
+    Callback = function(state)
+        State.ESP.Health = state
+    end,
+})
+
+EspTab:Toggle({
+    Title = "Esp Box Corner",
+    Flag = "esp_box_corner",
+    Value = false,
+    Callback = function(state)
+        State.ESP.BoxCorner = state
+    end,
+})
+
+EspTab:Colorpicker({
+    Title = "Cor do Esp",
+    Flag = "esp_color",
+    Default = Color3.fromRGB(255, 255, 255),
+    Callback = function(color)
+        State.ESP.Color = color
+    end,
+})
+
+EspTab:Slider({
+    Title = "Distância máxima",
+    Flag = "esp_max_distance",
+    Step = 50,
+    Value = { Min = 100, Max = 5000, Default = 2000 },
+    Callback = function(value)
+        State.ESP.MaxDistance = value
+    end,
+})
+
+----------------------------------------------------------------
+-- 4. Painel (Lock On, Auto Desvio)
+----------------------------------------------------------------
+local PainelTab = Window:Tab({
+    Title = "Painel",
+    Icon = "layout-dashboard",
+})
+
+----- Lock On -----
+local LockSection = PainelTab:Section({ Title = "Lock On", Opened = true })
+
+LockSection:Toggle({
+    Title = "Lock On",
+    Desc = "Mostra um botão flutuante. Aperte nele para travar a câmera no player mais próximo.",
+    Flag = "lockon_enabled",
+    Value = false,
+    Callback = function(state)
+        setLockEnabled(state)
+    end,
+})
+
+LockSection:Toggle({
+    Title = "Botão Trocar Alvo",
+    Desc = "Mostra um botão flutuante. Toque nele pra passar a trava pro próximo player mais perto (percorre todos antes de repetir).",
+    Flag = "lockon_switch_button",
+    Value = false,
+    Callback = function(state)
+        setSwitchButtonEnabled(state)
+    end,
+})
+
+LockSection:Toggle({
+    Title = "Trocar Sozinho ao Morrer",
+    Desc = "Quando o alvo morre, sai ou fica longe demais, a trava pula sozinha pro próximo mais perto em vez de desligar.",
+    Flag = "lockon_auto_switch",
+    Value = false,
+    Callback = function(state)
+        LockOn.AutoSwitch = state
+    end,
+})
+
+LockSection:Button({
+    Title = "Trocar Alvo",
+    Desc = "Troca a trava agora, direto do menu (igual ao botão flutuante).",
+    Icon = "repeat",
+    Callback = function()
+        switchLockTarget()
+    end,
+})
+
+LockSection:Toggle({
+    Title = "Travar Botão",
+    Desc = "Deixa os botões flutuantes (Lock On, Trocar Alvo e Pular Costas) e o Radar parados: eles não andam mais quando você toca.",
+    Flag = "lockon_button_locked",
+    Value = false,
+    Callback = function(state)
+        LockOn.ButtonLocked = state
+    end,
+})
+
+LockSection:Toggle({
+    Title = "Virar pro Alvo",
+    Desc = "Com o Lock On ativo, seu personagem fica virado pro alvo (as skills saem na direção dele).",
+    Flag = "lockon_face",
+    Value = false,
+    Callback = function(state)
+        Combat.FaceTarget = state
+    end,
+})
+
+LockSection:Dropdown({
+    Title = "Alvo do Lock On",
+    Values = { "Corpo", "Cabeça" },
+    Value = "Corpo",
+    Flag = "lockon_part",
+    Callback = function(selected)
+        LockOn.PartName = (selected == "Cabeça") and "Head" or "HumanoidRootPart"
+    end,
+})
+
+LockSection:Slider({
+    Title = "Distância máxima do Lock On",
+    Flag = "lockon_max_distance",
+    Step = 10,
+    Value = { Min = 20, Max = 1000, Default = 300 },
+    Callback = function(value)
+        LockOn.MaxDistance = value
+    end,
+})
+
+----- Auto Desvio -----
+local DodgeSection = PainelTab:Section({ Title = "Auto Desvio", Opened = true })
+
+DodgeSection:Toggle({
+    Title = "Auto Desvio",
+    Desc = "Quando qualquer player chega perto de você, seu personagem dá um passo pro lado sozinho.",
+    Flag = "dodge_enabled",
+    Value = false,
+    Callback = function(state)
+        Combat.Dodge.Enabled = state
+    end,
+})
+
+DodgeSection:Slider({
+    Title = "Distância de detecção",
+    Desc = "Se um player chegar mais perto que isso, você desvia.",
+    Flag = "dodge_range",
+    Step = 1,
+    Value = { Min = 5, Max = 40, Default = 15 },
+    Callback = function(value)
+        Combat.Dodge.Range = value
+    end,
+})
+
+DodgeSection:Slider({
+    Title = "Distância do passo",
+    Flag = "dodge_step",
+    Step = 1,
+    Value = { Min = 4, Max = 25, Default = 10 },
+    Callback = function(value)
+        Combat.Dodge.StepDistance = value
+    end,
+})
+
+DodgeSection:Slider({
+    Title = "Intervalo entre desvios (ms)",
+    Flag = "dodge_cooldown",
+    Step = 10,
+    Value = { Min = 100, Max = 200, Default = 200 },
+    Callback = function(value)
+        -- clamp: se uma config antiga salva (ex: 600) for carregada, não passa do limite novo
+        Combat.Dodge.Cooldown = math.clamp(value, 100, 200) / 1000
+    end,
+})
+
+----------------------------------------------------------------
+-- Mod (Câmera)
+----------------------------------------------------------------
+local ModTab = Window:Tab({
+    Title = "Mod",
+    Icon = "wrench",
+})
+
+----- Câmera -----
+local CamSection = ModTab:Section({ Title = "Câmera", Opened = true })
+
+CamSection:Toggle({
+    Title = "FOV",
+    Desc = "Aumenta o campo de visão pra enxergar mais longe. Fica travado: o Roblox e o jogo não conseguem mudar.",
+    Flag = "fov_enabled",
+    Value = false,
+    Callback = function(state)
+        setFOVEnabled(state)
+    end,
+})
+
+CamSection:Slider({
+    Title = "Valor do FOV",
+    Flag = "fov_value",
+    Step = 1,
+    Value = { Min = 70, Max = 120, Default = 100 },
+    Callback = function(value)
+        FOV.Value = value
+        applyFOV()
+    end,
+})
+
+CamSection:Toggle({
+    Title = "Câmera Longe (Travada)",
+    Desc = "Deixa a câmera afastada na distância escolhida e trava: o zoom (pinça/scroll) não muda mais.",
+    Flag = "cam_lock",
+    Value = false,
+    Callback = function(state)
+        setCamLockEnabled(state)
+    end,
+})
+
+CamSection:Slider({
+    Title = "Distância da Câmera",
+    Flag = "cam_distance",
+    Step = 1,
+    Value = { Min = 10, Max = 300, Default = 50 },
+    Callback = function(value)
+        CamLock.Distance = value
+        applyCamLock()
+    end,
+})
+
+CamSection:Toggle({
+    Title = "Câmera Atravessa Parede",
+    Desc = "Parede ou pilar entre a câmera e você fica transparente, em vez de puxar a câmera pra perto. Combina com a Câmera Longe. Só funciona se o jogo usar a câmera padrão do Roblox.",
+    Flag = "cam_wall",
+    Value = false,
+    Callback = function(state)
+        setWallCamEnabled(state)
+    end,
+})
+
+----- Segurança -----
+local SafeSection = ModTab:Section({ Title = "Segurança", Opened = true })
+
+SafeSection:Button({
+    Title = "Restaurar Botões",
+    Desc = "Use se o analógico ou os botões do Roblox/jogo pararem de responder.",
+    Icon = "rotate-ccw",
+    Callback = function()
+        restoreControls()
+        WindUI:Notify({
+            Title = "Buk",
+            Content = "Botões restaurados. Toque na tela uma vez.",
+            Duration = 3,
+        })
+    end,
+})
+
+----------------------------------------------------------------
+-- 5. Settings
+----------------------------------------------------------------
+local SettingsTab = Window:Tab({
+    Title = "Settings",
+    Icon = "settings",
+})
+
+-- Lista: Aparência
+local AppearanceSection = SettingsTab:Section({ Title = "Aparência", Opened = true })
+
+AppearanceSection:Dropdown({
+    Title = "Tema",
+    Values = { "Darker", "Dark", "Demon Slayer" },
+    Value = "Darker",
+    Flag = "theme",
+    Callback = function(selected)
+        WindUI:SetTheme(selected)
+    end,
+})
+
+AppearanceSection:Toggle({
+    Title = "Janela transparente",
+    Desc = "Deixa o menu meio transparente. Se o jogo ficar aparecendo 'fantasma' por trás, deixe desligado.",
+    Flag = "ui_transparent",
+    Value = false,
+    Callback = function(state)
+        pcall(function()
+            Window:ToggleTransparency(state)
+        end)
+    end,
+})
+
+-- Lista: Settings File
+local FileSection = SettingsTab:Section({ Title = "Settings File", Opened = true })
+
+FileSection:Button({
+    Title = "Save Settings",
+    Icon = "save",
+    Callback = function()
+        local ok = Config and pcall(function()
+            Config:Save()
+        end)
+        WindUI:Notify({
+            Title = "Buk",
+            Content = ok and "Configurações salvas com sucesso!" or "Não foi possível salvar as configurações.",
+            Duration = 3,
+            Icon = ok and "check" or "x",
+        })
+    end,
+})
+
+FileSection:Button({
+    Title = "Unload Script",
+    Icon = "power",
+    Callback = Unload,
+})
+
+----------------------------------------------------------------
+-- Finalização
+----------------------------------------------------------------
+if Config then
+    pcall(function()
+        Config:Load() -- carrega as configurações salvas anteriormente
+    end)
+end
+
+if not DrawingSupported then
+    WindUI:Notify({
+        Title = "Buk",
+        Content = "Seu executor não suporta a Drawing API. O Esp não vai funcionar.",
+        Duration = 6,
+        Icon = "triangle-alert",
+    })
+end
+
+WindUI:Notify({
+    Title = "Buk",
+    Content = "Script carregado! Pressione RightShift para abrir/fechar.",
+    Duration = 4,
+    Icon = "swords",
+})
