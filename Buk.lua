@@ -581,6 +581,9 @@ local Stick = {
     Distance = 3, -- quantos studs atrás do alvo você fica
     Options = {}, -- texto do dropdown -> Player
     LastBehind = nil, -- última direção "atrás" válida (se o alvo cair/ragdoll não vira de lado)
+    Orbit = false, -- gira em volta do alvo em vez de ficar só atrás
+    OrbitSpeed = 90, -- graus por segundo (slider no menu)
+    OrbitDir = nil, -- direção atual da órbita (o script mexe sozinho)
 }
 
 local StickGui, StickButton
@@ -641,6 +644,7 @@ end
 
 local function setStickActive(active)
     Stick.Waiting = false
+    Stick.OrbitDir = nil
     if active then
         local target = Stick.Target
         if not target then
@@ -663,6 +667,7 @@ local function selectStickTarget(label)
     local plr = Stick.Options[label]
     Stick.Target = plr
     Stick.Waiting = false
+    Stick.OrbitDir = nil
     if not plr then
         setStickActive(false)
     end
@@ -728,8 +733,8 @@ local function setStickEnabled(state)
     end
 end
 
--- Todo frame: fica atrás do alvo, olhando pra ele, e acompanha ele pra onde for
-connect(RunService.Heartbeat, function()
+-- Todo frame: fica atrás do alvo (ou orbitando), olhando pra ele, e acompanha ele pra onde for
+connect(RunService.Heartbeat, function(dt)
     if not (Stick.Enabled and Stick.Active) then
         return
     end
@@ -766,6 +771,12 @@ connect(RunService.Heartbeat, function()
         Stick.LastBehind = behind
     else
         behind = Stick.LastBehind or Vector3.zAxis
+    end
+
+    -- Órbita: a direção gira aos poucos em volta do alvo (só com o toggle "Orbitar" ligado)
+    if Stick.Orbit then
+        Stick.OrbitDir = CFrame.Angles(0, math.rad(Stick.OrbitSpeed) * dt, 0) * (Stick.OrbitDir or behind)
+        behind = Stick.OrbitDir
     end
 
     -- Parede atrás do alvo: fica mais perto dele em vez de entrar na parede
@@ -1908,6 +1919,27 @@ StickSection:Slider({
     Value = { Min = 2, Max = 10, Default = 3 },
     Callback = function(value)
         Stick.Distance = value
+    end,
+})
+
+StickSection:Toggle({
+    Title = "Orbitar",
+    Desc = "Em vez de ficar só atrás, você gira em volta do alvo enquanto está grudado.",
+    Flag = "stick_orbit",
+    Value = false,
+    Callback = function(state)
+        Stick.Orbit = state
+        Stick.OrbitDir = nil
+    end,
+})
+
+StickSection:Slider({
+    Title = "Velocidade da órbita (graus/s)",
+    Flag = "stick_orbit_speed",
+    Step = 10,
+    Value = { Min = 30, Max = 360, Default = 90 },
+    Callback = function(value)
+        Stick.OrbitSpeed = value
     end,
 })
 
