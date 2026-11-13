@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Full Bright, FPS Boost, Grudar nas Costas, Radar, Anti-Void, Trocar de Servidor) | Player (CFrame Speed até 300) | Esp | Painel (Lock On, Auto Desvio) | Mod (Câmera) | Settings
+    Abas: Main (Full Bright, Trocar de Servidor) | Player (CFrame Speed até 150) | Esp | Painel (Lock On) | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -70,14 +70,6 @@ local function notifyOnce(key, title, content)
     end
     lastNotify[key] = now
     WindUI:Notify({ Title = title, Content = content, Duration = 2 })
-end
-
-local function destroyGui(gui)
-    if gui then
-        pcall(function()
-            gui:Destroy()
-        end)
-    end
 end
 
 ----------------------------------------------------------------
@@ -295,7 +287,6 @@ local LockOn = {
     ButtonLocked = false, -- impede arrastar o botão
     PartName = "HumanoidRootPart",
     MaxDistance = 300,
-    AutoSwitch = false, -- quando o alvo morre/sai/fica longe, pula sozinho pro próximo mais perto
 }
 
 local LockGui, LockButton
@@ -319,17 +310,6 @@ local function getOrigin()
     end
     local cam = Workspace.CurrentCamera
     return cam and cam.CFrame.Position or Vector3.zero
-end
-
--- Humanoid e HumanoidRootPart do player, só se ele estiver vivo (senão devolve nil, nil)
-local function getAlive(plr)
-    local char = plr.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if hum and root and hum.Health > 0 then
-        return hum, root
-    end
-    return nil, nil
 end
 
 local function findNearestTarget()
@@ -550,346 +530,30 @@ RunService:BindToRenderStep("BukLockOn", Enum.RenderPriority.Camera.Value + 1, f
         return
     end
     local target = LockOn.Target
-    local part = target and getTargetPart(target)
 
-    if not part or (part.Position - getOrigin()).Magnitude > LockOn.MaxDistance then
-        -- alvo morreu, saiu ou ficou longe demais.
-        -- findNearestTarget já ignora morto/longe, então nunca devolve o alvo que acabou de cair.
-        local nextTarget = LockOn.AutoSwitch and findNearestTarget() or nil
-        if not nextTarget then
-            if LockOn.AutoSwitch then
-                notifyOnce("lockLost", "Lock On", "Sem mais alvos por perto. Lock desligado.")
-            end
-            setLockActive(false)
-            return
-        end
-        LockOn.Target = nextTarget
-        part = getTargetPart(nextTarget)
+    -- O alvo saiu do servidor: esse Player nunca mais volta, então não tem o que seguir
+    if not target or target.Parent ~= Players then
+        notifyOnce("lockLost", "Lock On", "O alvo saiu do jogo. Lock desligado.")
+        setLockActive(false)
+        return
+    end
+
+    -- Alvo morto ou renascendo: continua travado e volta a seguir quando ele reaparecer.
+    -- Só desliga quando você apertar o botão.
+    local part = getTargetPart(target)
+    if not part then
+        return
     end
 
     cam.CFrame = CFrame.lookAt(cam.CFrame.Position, part.Position)
 end)
 
 ----------------------------------------------------------------
--- Grudar nas Costas (escolhe o player no menu + botão flutuante)
-----------------------------------------------------------------
-local Stick = {
-    Enabled = false, -- mostra o botão flutuante
-    Active = false, -- grudado agora (botão apertado)
-    Waiting = false, -- true enquanto o alvo está morto: espera ele voltar pra grudar de novo
-    Target = nil, -- Player escolhido no menu
-    Distance = 3, -- quantos studs atrás do alvo você fica
-    Options = {}, -- texto do dropdown -> Player
-    LastBehind = nil, -- última direção "atrás" válida (se o alvo cair/ragdoll não vira de lado)
-    Orbit = false, -- gira em volta do alvo em vez de ficar só atrás
-    OrbitSpeed = 90, -- graus por segundo (slider no menu)
-    OrbitDir = nil, -- direção atual da órbita (o script mexe sozinho)
-}
-
-local StickGui, StickButton
-local StickDropdown -- criado lá embaixo, na aba Main
-local STICK_NONE = "Nenhum"
-local FLAT = Vector3.new(1, 0, 1)
-
-local stickParams = RaycastParams.new()
-stickParams.FilterType = Enum.RaycastFilterType.Exclude
-stickParams.RespectCanCollide = true
-local stickFilterMe, stickFilterThem
-
-local function stickLabel(plr)
-    return plr.DisplayName .. " (@" .. plr.Name .. ")"
-end
-
--- Texto de cada opção do dropdown (menos você e quem está saindo), em ordem alfabética
-local function buildStickOptions(leaving)
-    local plrs = {}
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr ~= leaving then
-            table.insert(plrs, plr)
-        end
-    end
-    table.sort(plrs, function(a, b)
-        return stickLabel(a):lower() < stickLabel(b):lower()
-    end)
-
-    local labels = { STICK_NONE }
-    table.clear(Stick.Options)
-    for _, plr in ipairs(plrs) do
-        local label = stickLabel(plr)
-        Stick.Options[label] = plr
-        table.insert(labels, label)
-    end
-    return labels
-end
-
-local function refreshStickButton()
-    if not StickButton then
-        return
-    end
-    local stroke = StickButton:FindFirstChildOfClass("UIStroke")
-    if Stick.Active then
-        StickButton.Text = "GRUDAR\nON"
-        StickButton.BackgroundColor3 = Color3.fromRGB(24, 60, 38)
-        if stroke then
-            stroke.Color = Color3.fromRGB(70, 255, 110)
-        end
-    else
-        StickButton.Text = "GRUDAR\nOFF"
-        StickButton.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
-        if stroke then
-            stroke.Color = Color3.fromRGB(255, 255, 255)
-        end
-    end
-end
-
-local function setStickActive(active)
-    Stick.Waiting = false
-    Stick.OrbitDir = nil
-    if active then
-        local target = Stick.Target
-        if not target then
-            Stick.Active = false
-            notifyOnce("stick", "Grudar nas Costas", "Escolha um player na aba Main primeiro.")
-        elseif not getAlive(target) then
-            Stick.Active = false
-            notifyOnce("stick", "Grudar nas Costas", "Esse player não está vivo agora.")
-        else
-            Stick.Active = true
-        end
-    else
-        Stick.Active = false
-    end
-    refreshStickButton()
-end
-
--- Chamado quando você escolhe alguém no dropdown. Se já estava grudado, passa a grudar no novo.
-local function selectStickTarget(label)
-    local plr = Stick.Options[label]
-    Stick.Target = plr
-    Stick.Waiting = false
-    Stick.OrbitDir = nil
-    if not plr then
-        setStickActive(false)
-    end
-end
-
--- Atualiza a lista do dropdown (alguém entrou ou saiu). `leaving` = quem está saindo agora.
-local function refreshStickList(leaving)
-    if leaving and Stick.Target == leaving then
-        Stick.Target = nil
-        setStickActive(false)
-        notifyOnce("stickLeft", "Grudar nas Costas", leaving.DisplayName .. " saiu do jogo.")
-    end
-
-    local labels = buildStickOptions(leaving)
-    if not StickDropdown then
-        return
-    end
-
-    local current = Stick.Target and stickLabel(Stick.Target) or STICK_NONE
-    pcall(function()
-        StickDropdown:Refresh(labels)
-    end)
-    pcall(function()
-        StickDropdown:Select(current)
-    end)
-end
-
-connect(Players.PlayerAdded, function()
-    refreshStickList()
-end)
-connect(Players.PlayerRemoving, refreshStickList)
-
-local function createStickGui()
-    if StickGui then
-        return
-    end
-    local cam = Workspace.CurrentCamera
-    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
-
-    -- Fica logo abaixo do botão do Lock On
-    StickGui, StickButton = createFloatingButton(
-        "BukStick",
-        "GRUDAR\nOFF",
-        math.max(vp.X - BUTTON_SIZE - 240, 0),
-        math.clamp(vp.Y * 0.5 + BUTTON_SIZE / 2 + 16, 0, math.max(vp.Y - BUTTON_SIZE, 0)),
-        function()
-            setStickActive(not Stick.Active)
-        end
-    )
-    StickButton.TextSize = 11
-    refreshStickButton()
-end
-
-local function setStickEnabled(state)
-    Stick.Enabled = state
-    if state then
-        createStickGui()
-    else
-        setStickActive(false)
-    end
-    if StickGui then
-        StickGui.Enabled = state
-    end
-end
-
--- Todo frame: fica atrás do alvo (ou orbitando), olhando pra ele, e acompanha ele pra onde for
-connect(RunService.Heartbeat, function(dt)
-    if not (Stick.Enabled and Stick.Active) then
-        return
-    end
-
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not (hum and root) or hum.Health <= 0 then
-        return
-    end
-
-    local target = Stick.Target
-    local tRoot
-    if target then
-        local _, r = getAlive(target)
-        tRoot = r
-    end
-
-    if not tRoot then
-        -- alvo morto (ou renascendo): continua ligado e gruda de novo quando ele voltar
-        if not Stick.Waiting then
-            Stick.Waiting = true
-            notifyOnce("stickWait", "Grudar nas Costas", "O alvo morreu. Eu grudo de novo quando ele voltar.")
-        end
-        return
-    end
-    Stick.Waiting = false
-
-    -- "Atrás" = o lado contrário de pra onde o alvo está olhando (só no plano horizontal)
-    local look = tRoot.CFrame.LookVector * FLAT
-    local behind
-    if look.Magnitude >= 0.05 then
-        behind = -look.Unit
-        Stick.LastBehind = behind
-    else
-        behind = Stick.LastBehind or Vector3.zAxis
-    end
-
-    -- Órbita: a direção gira aos poucos em volta do alvo (só com o toggle "Orbitar" ligado)
-    if Stick.Orbit then
-        Stick.OrbitDir = CFrame.Angles(0, math.rad(Stick.OrbitSpeed) * dt, 0) * (Stick.OrbitDir or behind)
-        behind = Stick.OrbitDir
-    end
-
-    -- Parede atrás do alvo: fica mais perto dele em vez de entrar na parede
-    if stickFilterMe ~= char or stickFilterThem ~= target.Character then
-        stickFilterMe, stickFilterThem = char, target.Character
-        stickParams.FilterDescendantsInstances = { char, target.Character }
-    end
-    local dist = Stick.Distance
-    local hit = Workspace:Raycast(tRoot.Position, behind * (dist + 1.5), stickParams)
-    if hit then
-        dist = math.max(hit.Distance - 1.5, 1.5)
-    end
-
-    local pos = tRoot.Position + behind * dist
-    root.CFrame = CFrame.lookAt(pos, Vector3.new(tRoot.Position.X, pos.Y, tRoot.Position.Z))
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
-end)
-
-----------------------------------------------------------------
--- Combate: Auto Desvio
+-- Combate: Virar pro Alvo
 ----------------------------------------------------------------
 local Combat = {
     FaceTarget = false,
-
-    -- Auto Desvio: quando qualquer player chega perto, dá um passo pro lado
-    Dodge = {
-        Enabled = false,
-        Range = 15,
-        StepDistance = 10,
-        Cooldown = 0.2,
-        Last = 0,
-        Busy = false, -- true enquanto o passo acontece (não empilha um desvio em cima do outro)
-    },
 }
-
--- Player vivo mais perto de você dentro da distância de detecção (ou nil)
-local function findThreat(myRoot)
-    local D = Combat.Dodge
-    local best, bestDist = nil, D.Range
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            local hum, root = getAlive(plr)
-            if hum and root then
-                local d = (myRoot.Position - root.Position).Magnitude
-                if d <= bestDist then
-                    best, bestDist = root, d
-                end
-            end
-        end
-    end
-    return best
-end
-
--- Tem chão logo embaixo desse ponto? (pra não mandar o personagem pra fora do mapa)
-local function hasGroundBelow(pos, params, depth)
-    return Workspace:Raycast(pos, Vector3.new(0, -(depth or 60), 0), params) ~= nil
-end
-
--- Escolhe um lado livre (sem parede e com chão) para desviar
-local function pickDodgeDirection(myRoot, threatRoot, distance)
-    local away = (myRoot.Position - threatRoot.Position) * Vector3.new(1, 0, 1)
-    if away.Magnitude < 0.1 then
-        away = myRoot.CFrame.LookVector * Vector3.new(1, 0, 1)
-    end
-    if away.Magnitude < 0.1 then
-        away = Vector3.zAxis
-    end
-    away = away.Unit
-
-    local side = away:Cross(Vector3.yAxis)
-    if math.random() < 0.5 then
-        side = -side
-    end
-
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LocalPlayer.Character }
-
-    for _, dir in ipairs({ side, -side, away }) do
-        local hit = Workspace:Raycast(myRoot.Position, dir * (distance + 2), params)
-        if not hit and hasGroundBelow(myRoot.Position + dir * distance, params, 60) then
-            return dir
-        end
-    end
-    return nil
-end
-
-local function performDodge(myRoot, threatRoot)
-    local D = Combat.Dodge
-    if D.Busy then
-        return
-    end
-
-    local dir = pickDodgeDirection(myRoot, threatRoot, D.StepDistance)
-    if not dir then
-        return
-    end
-
-    -- Desliza rápido (6 frames) em vez de teleportar de uma vez
-    D.Busy = true
-    task.spawn(function()
-        local steps = 6
-        for _ = 1, steps do
-            if not myRoot.Parent then
-                break
-            end
-            myRoot.CFrame += dir * (D.StepDistance / steps)
-            task.wait()
-        end
-        D.Busy = false
-    end)
-end
 
 connect(RunService.Heartbeat, function()
     local char = LocalPlayer.Character
@@ -899,14 +563,8 @@ connect(RunService.Heartbeat, function()
         return
     end
 
-    local now = os.clock()
-
-    -- Grudado nas costas de alguém: o Grudar manda na posição e na direção do personagem,
-    -- então o Virar pro Alvo e o Auto Desvio ficam quietos enquanto isso.
-    local sticking = Stick.Enabled and Stick.Active and not Stick.Waiting
-
     -- Virar pro alvo do Lock On
-    if not sticking and Combat.FaceTarget and LockOn.Enabled and LockOn.Active and LockOn.Target then
+    if Combat.FaceTarget and LockOn.Enabled and LockOn.Active and LockOn.Target then
         local part = getTargetPart(LockOn.Target)
         if part then
             local p = part.Position
@@ -916,20 +574,10 @@ connect(RunService.Heartbeat, function()
             end
         end
     end
-
-    -- Auto Desvio
-    local D = Combat.Dodge
-    if D.Enabled and not sticking and not D.Busy and now - D.Last >= D.Cooldown then
-        local threat = findThreat(root)
-        if threat then
-            D.Last = now
-            performDodge(root, threat)
-        end
-    end
 end)
 
 ----------------------------------------------------------------
--- Main: Full Bright + FPS Boost
+-- Main: Full Bright
 ----------------------------------------------------------------
 local Bright = {
     Enabled = false,
@@ -997,404 +645,6 @@ local function setBrightEnabled(state)
         table.clear(Bright.Atmos)
     end
 end
-
-local Perf = {
-    Enabled = false,
-    OrigShadows = nil,
-    OrigQuality = nil,
-    Disabled = setmetatable({}, { __mode = "k" }), -- efeitos que o script desligou
-    Conns = {},
-}
-
-local function disableEffect(inst)
-    if
-        (
-            inst:IsA("ParticleEmitter")
-            or inst:IsA("Trail")
-            or inst:IsA("Beam")
-            or inst:IsA("Smoke")
-            or inst:IsA("Fire")
-            or inst:IsA("Sparkles")
-            or inst:IsA("PostEffect")
-        ) and inst.Enabled
-    then
-        Perf.Disabled[inst] = true
-        inst.Enabled = false
-    end
-end
-
-local function setPerfEnabled(state)
-    if state then
-        if Perf.Enabled then
-            return
-        end
-        Perf.Enabled = true
-
-        Perf.OrigShadows = Lighting.GlobalShadows
-        Lighting.GlobalShadows = false
-        pcall(function()
-            Perf.OrigQuality = settings().Rendering.QualityLevel
-            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-        end)
-
-        -- Efeitos novos (skills, golpes) também são desligados
-        local function onAdded(inst)
-            pcall(disableEffect, inst)
-        end
-        table.insert(Perf.Conns, Workspace.DescendantAdded:Connect(onAdded))
-        table.insert(Perf.Conns, Lighting.DescendantAdded:Connect(onAdded))
-
-        -- Efeitos que já existem (varre aos poucos pra não travar)
-        task.spawn(function()
-            local n = 0
-            for _, container in ipairs({ Workspace, Lighting }) do
-                for _, inst in ipairs(container:GetDescendants()) do
-                    if not Perf.Enabled then
-                        return
-                    end
-                    pcall(disableEffect, inst)
-                    n += 1
-                    if n % 400 == 0 then
-                        task.wait()
-                    end
-                end
-            end
-        end)
-    else
-        Perf.Enabled = false
-
-        for _, c in ipairs(Perf.Conns) do
-            pcall(function()
-                c:Disconnect()
-            end)
-        end
-        table.clear(Perf.Conns)
-
-        for inst in pairs(Perf.Disabled) do
-            if inst.Parent then
-                pcall(function()
-                    inst.Enabled = true
-                end)
-            end
-        end
-        table.clear(Perf.Disabled)
-
-        if Perf.OrigShadows ~= nil then
-            Lighting.GlobalShadows = Perf.OrigShadows
-        end
-        if Perf.OrigQuality ~= nil then
-            pcall(function()
-                settings().Rendering.QualityLevel = Perf.OrigQuality
-            end)
-        end
-        Perf.OrigShadows, Perf.OrigQuality = nil, nil
-    end
-end
-
-----------------------------------------------------------------
--- Main: Radar e Anti-Void
-----------------------------------------------------------------
------ Radar -----
-local Radar = {
-    Enabled = false,
-    Range = 150, -- alcance em studs (a borda do círculo)
-    Size = 150, -- tamanho do círculo em pixels
-    Dots = {}, -- Player -> bolinha
-}
-
-local RadarGui, RadarFrame
-local DOT_SIZE = 7
-
-local function createRadarGui()
-    if RadarGui then
-        return
-    end
-
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "BukRadar"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 997
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-    -- O fundo é um TextButton só pra receber o toque de arrastar
-    local frame = Instance.new("TextButton")
-    frame.Name = "Radar"
-    frame.AutoButtonColor = false
-    frame.Text = ""
-    frame.BorderSizePixel = 0
-    frame.Size = UDim2.fromOffset(Radar.Size, Radar.Size)
-    frame.Position = UDim2.fromOffset(12, 70)
-    frame.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
-    frame.BackgroundTransparency = 0.35
-    frame.Parent = gui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(1, 0)
-    corner.Parent = frame
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Thickness = 1.5
-    stroke.Color = Color3.fromRGB(255, 255, 255)
-    stroke.Transparency = 0.3
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    stroke.Parent = frame
-
-    -- Círculo do meio (metade do alcance)
-    local ring = Instance.new("Frame")
-    ring.Name = "Ring"
-    ring.AnchorPoint = Vector2.new(0.5, 0.5)
-    ring.Position = UDim2.fromScale(0.5, 0.5)
-    ring.Size = UDim2.fromScale(0.5, 0.5)
-    ring.BackgroundTransparency = 1
-    ring.BorderSizePixel = 0
-    ring.Parent = frame
-    local ringCorner = Instance.new("UICorner")
-    ringCorner.CornerRadius = UDim.new(1, 0)
-    ringCorner.Parent = ring
-    local ringStroke = Instance.new("UIStroke")
-    ringStroke.Thickness = 1
-    ringStroke.Color = Color3.fromRGB(255, 255, 255)
-    ringStroke.Transparency = 0.8
-    ringStroke.Parent = ring
-
-    -- Cruz no centro
-    local function addLine(name, size)
-        local line = Instance.new("Frame")
-        line.Name = name
-        line.AnchorPoint = Vector2.new(0.5, 0.5)
-        line.Position = UDim2.fromScale(0.5, 0.5)
-        line.Size = size
-        line.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        line.BackgroundTransparency = 0.85
-        line.BorderSizePixel = 0
-        line.Parent = frame
-    end
-    addLine("LineH", UDim2.new(1, -12, 0, 1))
-    addLine("LineV", UDim2.new(0, 1, 1, -12))
-
-    -- Você (centro) e a seta que mostra "pra frente" (a câmera sempre aponta pra cima)
-    local me = Instance.new("Frame")
-    me.Name = "Me"
-    me.AnchorPoint = Vector2.new(0.5, 0.5)
-    me.Position = UDim2.fromScale(0.5, 0.5)
-    me.Size = UDim2.fromOffset(8, 8)
-    me.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    me.BorderSizePixel = 0
-    me.ZIndex = 3
-    me.Parent = frame
-    local meCorner = Instance.new("UICorner")
-    meCorner.CornerRadius = UDim.new(1, 0)
-    meCorner.Parent = me
-
-    local north = Instance.new("TextLabel")
-    north.Name = "Front"
-    north.AnchorPoint = Vector2.new(0.5, 0)
-    north.Position = UDim2.new(0.5, 0, 0, 3)
-    north.Size = UDim2.fromOffset(12, 10)
-    north.BackgroundTransparency = 1
-    north.BorderSizePixel = 0
-    north.Font = Enum.Font.GothamBold
-    north.TextSize = 9
-    north.Text = "▲"
-    north.TextColor3 = Color3.fromRGB(255, 255, 255)
-    north.TextTransparency = 0.35
-    north.ZIndex = 3
-    north.Parent = frame
-
-    mountGui(gui)
-    makeDraggable(gui, frame, nil)
-
-    RadarGui, RadarFrame = gui, frame
-end
-
-local function getDot(plr)
-    local dot = Radar.Dots[plr]
-    if dot and dot.Parent then
-        return dot
-    end
-    if not RadarFrame then
-        return nil
-    end
-
-    dot = Instance.new("Frame")
-    dot.Name = "Dot"
-    dot.AnchorPoint = Vector2.new(0.5, 0.5)
-    dot.Size = UDim2.fromOffset(DOT_SIZE, DOT_SIZE)
-    dot.BorderSizePixel = 0
-    dot.ZIndex = 2
-    dot.Visible = false
-    dot.Parent = RadarFrame
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(1, 0)
-    corner.Parent = dot
-
-    Radar.Dots[plr] = dot
-    return dot
-end
-
-local function removeDot(plr)
-    local dot = Radar.Dots[plr]
-    Radar.Dots[plr] = nil
-    destroyGui(dot)
-end
-
-local function setRadarEnabled(state)
-    Radar.Enabled = state
-    if state then
-        createRadarGui()
-    end
-    if RadarGui then
-        RadarGui.Enabled = state
-    end
-end
-
-local function setRadarSize(size)
-    Radar.Size = size
-    if RadarFrame then
-        RadarFrame.Size = UDim2.fromOffset(size, size)
-    end
-end
-
-connect(Players.PlayerRemoving, removeDot)
-
--- Cada frame: pega a direção da câmera e põe cada player no círculo (frente = pra cima)
-connect(RunService.RenderStepped, function()
-    if not (Radar.Enabled and RadarFrame) then
-        return
-    end
-    local cam = Workspace.CurrentCamera
-    if not cam then
-        return
-    end
-
-    local look = cam.CFrame.LookVector
-    local forward = Vector3.new(look.X, 0, look.Z)
-    if forward.Magnitude < 0.05 then
-        -- câmera olhando reto pra cima/baixo: usa a direção "de cima" dela
-        local up = cam.CFrame.UpVector
-        forward = Vector3.new(up.X, 0, up.Z)
-    end
-    if forward.Magnitude < 0.01 then
-        forward = Vector3.new(0, 0, -1)
-    end
-    forward = forward.Unit
-    local right = forward:Cross(Vector3.yAxis)
-
-    local origin = getOrigin()
-    local radius = RadarFrame.AbsoluteSize.X / 2 - DOT_SIZE
-    local color = State.ESP.Color
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            local _, root = getAlive(plr)
-            if root then
-                local dot = getDot(plr)
-                if dot then
-                    local offset = root.Position - origin
-                    local dx = offset:Dot(right)
-                    local dz = offset:Dot(forward)
-                    local dist = math.sqrt(dx * dx + dz * dz)
-
-                    local x, y = 0, 0
-                    if dist > 0.01 then
-                        -- passou do alcance: fica grudado na borda (mostra a direção)
-                        local k = (math.min(dist, Radar.Range) / Radar.Range) * radius / dist
-                        x, y = dx * k, -dz * k
-                    end
-
-                    local isTarget = LockOn.Active and LockOn.Target == plr
-                    local size = isTarget and DOT_SIZE + 3 or DOT_SIZE
-                    dot.Position = UDim2.new(0.5, x, 0.5, y)
-                    dot.Size = UDim2.fromOffset(size, size)
-                    dot.BackgroundColor3 = isTarget and Color3.fromRGB(255, 60, 60) or color
-                    dot.BackgroundTransparency = dist > Radar.Range and 0.55 or 0
-                    dot.Visible = true
-                end
-            else
-                local dot = Radar.Dots[plr]
-                if dot then
-                    dot.Visible = false
-                end
-            end
-        end
-    end
-end)
-
------ Anti-Void -----
-local AntiVoid = {
-    Enabled = false,
-    FallDistance = 80, -- queda (em studs) sem chão embaixo antes de te devolver
-    LastSafe = nil, -- CFrame do último lugar onde você estava pisando em chão
-    Char = nil,
-    LastCheck = 0,
-    LastRescue = 0,
-}
-
-local voidParams = RaycastParams.new()
-voidParams.FilterType = Enum.RaycastFilterType.Exclude
-
-connect(RunService.Heartbeat, function()
-    if not AntiVoid.Enabled then
-        return
-    end
-
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not (hum and root) or hum.Health <= 0 then
-        return
-    end
-
-    -- Personagem novo (respawn): esquece o chão da vida anterior
-    if AntiVoid.Char ~= char then
-        AntiVoid.Char = char
-        AntiVoid.LastSafe = nil
-    end
-
-    -- Confere 10 vezes por segundo (mais que isso não precisa)
-    local now = os.clock()
-    if now - AntiVoid.LastCheck < 0.1 then
-        return
-    end
-    AntiVoid.LastCheck = now
-
-    -- Pisando em chão: guarda esse lugar como seguro
-    if hum.FloorMaterial ~= Enum.Material.Air then
-        AntiVoid.LastSafe = root.CFrame
-        return
-    end
-
-    local safe = AntiVoid.LastSafe
-    if not safe then
-        return
-    end
-
-    local pos = root.Position
-    -- Perto da altura em que o Roblox destrói quem cai do mapa: volta na hora
-    local belowMap = pos.Y < Workspace.FallenPartsDestroyHeight + 40
-    if not belowMap then
-        if safe.Position.Y - pos.Y < AntiVoid.FallDistance then
-            return -- ainda não caiu o bastante
-        end
-        -- Tem chão lá embaixo? Então não é vazio, é só uma queda grande: deixa cair
-        voidParams.FilterDescendantsInstances = { char }
-        if Workspace:Raycast(pos, Vector3.new(0, -2000, 0), voidParams) then
-            return
-        end
-    end
-
-    if now - AntiVoid.LastRescue < 1 then
-        return
-    end
-    AntiVoid.LastRescue = now
-
-    root.CFrame = safe + Vector3.new(0, 3, 0)
-    root.AssemblyLinearVelocity = Vector3.zero
-    root.AssemblyAngularVelocity = Vector3.zero
-    notifyOnce("void", "Anti-Void", "Você caiu fora do mapa. Voltei pro último chão seguro.")
-end)
 
 ----- Trocar de Servidor -----
 local Hop = {
@@ -1691,23 +941,10 @@ local function Unload()
     LockOn.Enabled = false
     LockOn.Active = false
     LockOn.Target = nil
-    LockOn.AutoSwitch = false
     Combat.FaceTarget = false
-    Combat.Dodge.Enabled = false
     setFOVEnabled(false)
     setBrightEnabled(false)
-    setPerfEnabled(false)
     setCamLockEnabled(false)
-    Stick.Enabled = false
-    Stick.Active = false
-    Stick.Target = nil
-    Radar.Enabled = false
-    AntiVoid.Enabled = false
-    destroyGui(StickGui)
-    StickGui, StickButton = nil, nil
-    destroyGui(RadarGui)
-    RadarGui, RadarFrame = nil, nil
-    table.clear(Radar.Dots)
     pcall(function()
         RunService:UnbindFromRenderStep("BukFOV")
     end)
@@ -1861,7 +1098,7 @@ do
 end
 
 ----------------------------------------------------------------
--- 1. Main (Full Bright, FPS Boost)
+-- 1. Main (Full Bright, Trocar de Servidor)
 ----------------------------------------------------------------
 local MainTab = Window:Tab({
     Title = "Main",
@@ -1875,132 +1112,6 @@ MainTab:Toggle({
     Value = false,
     Callback = function(state)
         setBrightEnabled(state)
-    end,
-})
-
-MainTab:Toggle({
-    Title = "FPS Boost",
-    Desc = "Desliga sombras, efeitos e partículas pra ganhar FPS no celular.",
-    Flag = "main_fps_boost",
-    Value = false,
-    Callback = function(state)
-        setPerfEnabled(state)
-    end,
-})
-
------ Grudar nas Costas -----
-local StickSection = MainTab:Section({ Title = "Grudar nas Costas", Opened = true })
-
--- Sem Flag de propósito: o player escolhido não é salvo (na próxima partida a lista é outra)
-StickDropdown = StickSection:Dropdown({
-    Title = "Escolher Player",
-    Desc = "Escolha em quem grudar. A lista atualiza sozinha quando alguém entra ou sai.",
-    Values = buildStickOptions(),
-    Value = STICK_NONE,
-    Callback = function(selected)
-        selectStickTarget(selected)
-    end,
-})
-
-StickSection:Toggle({
-    Title = "Botão Grudar",
-    Desc = "Mostra um botão flutuante (igual ao Lock On). Toque nele pra ir até o player escolhido e ficar grudado nas costas dele, seguindo ele pra onde for. Toque de novo pra soltar.",
-    Flag = "stick_button",
-    Value = false,
-    Callback = function(state)
-        setStickEnabled(state)
-    end,
-})
-
-StickSection:Slider({
-    Title = "Distância atrás do alvo",
-    Flag = "stick_distance",
-    Step = 1,
-    Value = { Min = 2, Max = 10, Default = 3 },
-    Callback = function(value)
-        Stick.Distance = value
-    end,
-})
-
-StickSection:Toggle({
-    Title = "Orbitar",
-    Desc = "Em vez de ficar só atrás, você gira em volta do alvo enquanto está grudado.",
-    Flag = "stick_orbit",
-    Value = false,
-    Callback = function(state)
-        Stick.Orbit = state
-        Stick.OrbitDir = nil
-    end,
-})
-
-StickSection:Slider({
-    Title = "Velocidade da órbita (graus/s)",
-    Flag = "stick_orbit_speed",
-    Step = 10,
-    Value = { Min = 30, Max = 360, Default = 90 },
-    Callback = function(value)
-        Stick.OrbitSpeed = value
-    end,
-})
-
------ Radar -----
-local RadarSection = MainTab:Section({ Title = "Radar", Opened = true })
-
-RadarSection:Toggle({
-    Title = "Radar",
-    Desc = "Mini-mapa redondo com os players por perto. Gira junto com a sua câmera (frente = pra cima). Dá pra arrastar.",
-    Flag = "radar_enabled",
-    Value = false,
-    Callback = function(state)
-        setRadarEnabled(state)
-    end,
-})
-
-RadarSection:Slider({
-    Title = "Alcance do Radar",
-    Desc = "Distância até a borda do círculo. Quem está mais longe fica meio apagado na borda.",
-    Flag = "radar_range",
-    Step = 10,
-    Value = { Min = 50, Max = 500, Default = 150 },
-    Callback = function(value)
-        Radar.Range = value
-    end,
-})
-
-RadarSection:Slider({
-    Title = "Tamanho do Radar",
-    Flag = "radar_size",
-    Step = 10,
-    Value = { Min = 100, Max = 220, Default = 150 },
-    Callback = function(value)
-        setRadarSize(value)
-    end,
-})
-
------ Anti-Void -----
-local VoidSection = MainTab:Section({ Title = "Anti-Void", Opened = true })
-
-VoidSection:Toggle({
-    Title = "Anti-Void",
-    Desc = "Se você cair fora do mapa, volta pro último chão em que pisou, antes de morrer.",
-    Flag = "antivoid_enabled",
-    Value = false,
-    Callback = function(state)
-        AntiVoid.Enabled = state
-        if not state then
-            AntiVoid.LastSafe = nil
-        end
-    end,
-})
-
-VoidSection:Slider({
-    Title = "Queda sem chão (studs)",
-    Desc = "Se você cair mais que isso e não tiver chão embaixo, volta. Menor = volta mais rápido.",
-    Flag = "antivoid_fall",
-    Step = 10,
-    Value = { Min = 40, Max = 300, Default = 80 },
-    Callback = function(value)
-        AntiVoid.FallDistance = value
     end,
 })
 
@@ -2048,9 +1159,10 @@ PlayerTab:Slider({
     Title = "Velocidade",
     Flag = "cframe_speed_value",
     Step = 1,
-    Value = { Min = 1, Max = 300, Default = 30 },
+    Value = { Min = 1, Max = 150, Default = 30 },
     Callback = function(value)
-        State.SpeedValue = value
+        -- clamp: se uma config antiga salva (ex: 300) for carregada, não passa do limite novo
+        State.SpeedValue = math.clamp(value, 1, 150)
     end,
 })
 
@@ -2110,7 +1222,7 @@ EspTab:Slider({
 })
 
 ----------------------------------------------------------------
--- 4. Painel (Lock On, Auto Desvio)
+-- 4. Painel (Lock On)
 ----------------------------------------------------------------
 local PainelTab = Window:Tab({
     Title = "Painel",
@@ -2122,7 +1234,7 @@ local LockSection = PainelTab:Section({ Title = "Lock On", Opened = true })
 
 LockSection:Toggle({
     Title = "Lock On",
-    Desc = "Mostra um botão flutuante. Aperte nele para travar a câmera no player mais próximo.",
+    Desc = "Mostra um botão flutuante. Aperte nele para travar a câmera no player mais próximo. A trava continua mesmo se o alvo morrer; só desliga quando você apertar o botão de novo.",
     Flag = "lockon_enabled",
     Value = false,
     Callback = function(state)
@@ -2131,18 +1243,8 @@ LockSection:Toggle({
 })
 
 LockSection:Toggle({
-    Title = "Trocar Sozinho ao Morrer",
-    Desc = "Quando o alvo morre, sai ou fica longe demais, a trava pula sozinha pro próximo mais perto em vez de desligar.",
-    Flag = "lockon_auto_switch",
-    Value = false,
-    Callback = function(state)
-        LockOn.AutoSwitch = state
-    end,
-})
-
-LockSection:Toggle({
     Title = "Travar Botão",
-    Desc = "Deixa os botões flutuantes (Lock On e Grudar) e o Radar parados: eles não andam mais quando você toca.",
+    Desc = "Deixa o botão flutuante do Lock On parado: ele não anda mais quando você toca.",
     Flag = "lockon_button_locked",
     Value = false,
     Callback = function(state)
@@ -2172,56 +1274,12 @@ LockSection:Dropdown({
 
 LockSection:Slider({
     Title = "Distância máxima do Lock On",
+    Desc = "Até onde ele procura o player quando você aperta o botão. Depois de travado, a distância não importa mais.",
     Flag = "lockon_max_distance",
     Step = 10,
     Value = { Min = 20, Max = 1000, Default = 300 },
     Callback = function(value)
         LockOn.MaxDistance = value
-    end,
-})
-
------ Auto Desvio -----
-local DodgeSection = PainelTab:Section({ Title = "Auto Desvio", Opened = true })
-
-DodgeSection:Toggle({
-    Title = "Auto Desvio",
-    Desc = "Quando qualquer player chega perto de você, seu personagem dá um passo pro lado sozinho.",
-    Flag = "dodge_enabled",
-    Value = false,
-    Callback = function(state)
-        Combat.Dodge.Enabled = state
-    end,
-})
-
-DodgeSection:Slider({
-    Title = "Distância de detecção",
-    Desc = "Se um player chegar mais perto que isso, você desvia.",
-    Flag = "dodge_range",
-    Step = 1,
-    Value = { Min = 5, Max = 40, Default = 15 },
-    Callback = function(value)
-        Combat.Dodge.Range = value
-    end,
-})
-
-DodgeSection:Slider({
-    Title = "Distância do passo",
-    Flag = "dodge_step",
-    Step = 1,
-    Value = { Min = 4, Max = 25, Default = 10 },
-    Callback = function(value)
-        Combat.Dodge.StepDistance = value
-    end,
-})
-
-DodgeSection:Slider({
-    Title = "Intervalo entre desvios (ms)",
-    Flag = "dodge_cooldown",
-    Step = 10,
-    Value = { Min = 100, Max = 200, Default = 200 },
-    Callback = function(value)
-        -- clamp: se uma config antiga salva (ex: 600) for carregada, não passa do limite novo
-        Combat.Dodge.Cooldown = math.clamp(value, 100, 200) / 1000
     end,
 })
 
