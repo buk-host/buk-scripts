@@ -291,9 +291,18 @@ local LockOn = {
 }
 
 local LockGui, LockButton
-local LockDotGui, LockDotFrame -- ponto que aparece no alvo
-local LockDot = { Size = 8 } -- tamanho do ponto em pixels (dropdown "Ponto do Lock On")
-local LOCK_DOT_SIZES = { Fino = 4, ["Médio"] = 8, Grosso = 12, Grande = 18 }
+local LockDotGui, LockDotFrame -- mira (anel + ponto) que aparece no alvo
+-- Tamanhos do dropdown "Ponto do Lock On": anel (px), ponto do meio (px) e espessura do anel
+local LOCK_DOT_SIZES = {
+    Fino = { ring = 26, dot = 4, thick = 1.5 },
+    ["Médio"] = { ring = 34, dot = 6, thick = 2 },
+    Grosso = { ring = 44, dot = 8, thick = 2.5 },
+    Grande = { ring = 58, dot = 10, thick = 3 },
+}
+local LockDot = {
+    Preset = LOCK_DOT_SIZES["Médio"],
+    Color = Color3.fromRGB(255, 60, 60), -- cor do ponto do meio
+}
 local BUTTON_SIZE = 64
 local DRAG_THRESHOLD = 8 -- pixels que o dedo precisa mover para contar como arraste
 
@@ -534,7 +543,19 @@ local function createLockGui()
     refreshLockButton()
 end
 
--- Ponto (estilo mira do GTA) que fica em cima do alvo enquanto o Lock On está ativo
+-- Mira (estilo GTA) que fica em cima do alvo enquanto o Lock On está ativo:
+-- anel fino com um ponto no meio. Quando trava, o anel encolhe até o alvo.
+local function applyLockDotSize()
+    if not LockDotFrame then
+        return
+    end
+    local p = LockDot.Preset
+    LockDotFrame.Size = UDim2.fromOffset(p.ring, p.ring)
+    LockDot.RingStroke.Thickness = p.thick
+    LockDot.ShadowStroke.Thickness = p.thick + 2
+    LockDot.Center.Size = UDim2.fromOffset(p.dot, p.dot)
+end
+
 local function createLockDot()
     if LockDotGui then
         return
@@ -547,39 +568,107 @@ local function createLockDot()
     gui.DisplayOrder = 998
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-    local dot = Instance.new("Frame")
-    dot.Name = "Dot"
-    dot.AnchorPoint = Vector2.new(0.5, 0.5)
-    dot.Size = UDim2.fromOffset(LockDot.Size, LockDot.Size)
-    dot.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-    dot.BorderSizePixel = 0
-    dot.Visible = false
-    dot.Parent = gui
+    -- Caixa invisível do tamanho do anel, centrada no alvo
+    local box = Instance.new("Frame")
+    box.Name = "Dot"
+    box.AnchorPoint = Vector2.new(0.5, 0.5)
+    box.BackgroundTransparency = 1
+    box.BorderSizePixel = 0
+    box.Visible = false
+    box.Parent = gui
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(1, 0)
-    corner.Parent = dot
+    -- Grupo dos anéis: é ele que encolhe na animação de travar
+    local group = Instance.new("Frame")
+    group.Name = "Rings"
+    group.AnchorPoint = Vector2.new(0.5, 0.5)
+    group.Position = UDim2.fromScale(0.5, 0.5)
+    group.Size = UDim2.fromScale(1, 1)
+    group.BackgroundTransparency = 1
+    group.BorderSizePixel = 0
+    group.Parent = box
 
-    -- Contorno escuro fininho: o ponto aparece em qualquer fundo
-    local stroke = Instance.new("UIStroke")
-    stroke.Thickness = 1
-    stroke.Color = Color3.fromRGB(0, 0, 0)
-    stroke.Transparency = 0.2
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    stroke.Parent = dot
+    local scale = Instance.new("UIScale")
+    scale.Parent = group
+
+    local function makeRing(name, color, transparency)
+        local ring = Instance.new("Frame")
+        ring.Name = name
+        ring.Size = UDim2.fromScale(1, 1)
+        ring.BackgroundTransparency = 1
+        ring.BorderSizePixel = 0
+        ring.Parent = group
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = ring
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = color
+        stroke.Transparency = transparency
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = ring
+        return stroke
+    end
+
+    -- Anel escuro por baixo (contorno): a mira aparece em qualquer fundo
+    local shadowStroke = makeRing("Shadow", Color3.fromRGB(0, 0, 0), 0.55)
+    local ringStroke = makeRing("Ring", Color3.fromRGB(255, 255, 255), 0)
+
+    -- Ponto do meio (a cor dele dá pra mudar no menu)
+    local center = Instance.new("Frame")
+    center.Name = "Center"
+    center.AnchorPoint = Vector2.new(0.5, 0.5)
+    center.Position = UDim2.fromScale(0.5, 0.5)
+    center.BackgroundColor3 = LockDot.Color
+    center.BorderSizePixel = 0
+    center.Parent = box
+
+    local centerCorner = Instance.new("UICorner")
+    centerCorner.CornerRadius = UDim.new(1, 0)
+    centerCorner.Parent = center
+
+    local centerStroke = Instance.new("UIStroke")
+    centerStroke.Thickness = 1
+    centerStroke.Color = Color3.fromRGB(0, 0, 0)
+    centerStroke.Transparency = 0.2
+    centerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    centerStroke.Parent = center
+
+    LockDot.Scale, LockDot.RingStroke, LockDot.ShadowStroke, LockDot.Center =
+        scale, ringStroke, shadowStroke, center
 
     mountGui(gui)
-    LockDotGui, LockDotFrame = gui, dot
+    LockDotGui, LockDotFrame = gui, box
+    applyLockDotSize()
 end
 
-local function setLockDotSize(size)
-    LockDot.Size = size
-    if LockDotFrame then
-        LockDotFrame.Size = UDim2.fromOffset(size, size)
+local function setLockDotSize(preset)
+    LockDot.Preset = preset
+    applyLockDotSize()
+end
+
+local function setLockDotColor(color)
+    LockDot.Color = color
+    if LockDot.Center then
+        LockDot.Center.BackgroundColor3 = color
     end
 end
 
--- Põe o ponto em cima da parte travada (some se ela estiver fora da tela)
+-- Efeito de travar: o anel começa grande e meio apagado e encolhe até o alvo
+local LOCK_DOT_TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+local function playLockDotAnim()
+    if not LockDot.Scale then
+        return
+    end
+    LockDot.Scale.Scale = 2.4
+    LockDot.RingStroke.Transparency = 0.8
+    TweenService:Create(LockDot.Scale, LOCK_DOT_TWEEN, { Scale = 1 }):Play()
+    TweenService:Create(LockDot.RingStroke, LOCK_DOT_TWEEN, { Transparency = 0 }):Play()
+end
+
+-- Põe a mira em cima da parte travada (some se ela estiver fora da tela).
+-- Toda vez que ela volta a aparecer (travou agora, ou o alvo renasceu), toca a animação.
 local function updateLockDot(cam, part)
     if not LockDotFrame then
         return
@@ -587,7 +676,10 @@ local function updateLockDot(cam, part)
     local pos, onScreen = cam:WorldToViewportPoint(part.Position)
     if onScreen then
         LockDotFrame.Position = UDim2.fromOffset(pos.X, pos.Y)
-        LockDotFrame.Visible = true
+        if not LockDotFrame.Visible then
+            LockDotFrame.Visible = true
+            playLockDotAnim()
+        end
     else
         LockDotFrame.Visible = false
     end
@@ -1504,12 +1596,22 @@ LockSection:Dropdown({
 
 LockSection:Dropdown({
     Title = "Ponto do Lock On",
-    Desc = "Ponto que aparece no alvo quando o Lock On está ativo. Escolha a espessura.",
+    Desc = "Mira (anel com ponto) que aparece no alvo quando o Lock On está ativo. Escolha o tamanho.",
     Values = { "Fino", "Médio", "Grosso", "Grande" },
     Value = "Médio",
     Flag = "lockon_dot_size",
     Callback = function(selected)
-        setLockDotSize(LOCK_DOT_SIZES[selected] or 8)
+        setLockDotSize(LOCK_DOT_SIZES[selected] or LOCK_DOT_SIZES["Médio"])
+    end,
+})
+
+LockSection:Colorpicker({
+    Title = "Cor do Ponto",
+    Desc = "Cor do ponto no meio do anel.",
+    Flag = "lockon_dot_color",
+    Default = Color3.fromRGB(255, 60, 60),
+    Callback = function(color)
+        setLockDotColor(color)
     end,
 })
 
