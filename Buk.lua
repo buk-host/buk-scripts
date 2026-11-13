@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Full Bright, Trocar de Servidor) | Player (CFrame Speed até 150) | Esp | Painel (Lock On) | Mod (Câmera) | Settings
+    Abas: Main (Full Bright, Trocar de Servidor) | Player (CFrame Speed até 150, Shift Lock) | Esp | Painel (Lock On) | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -24,6 +24,7 @@ local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -286,10 +287,13 @@ local LockOn = {
     Target = nil, -- Player travado
     ButtonLocked = false, -- impede arrastar o botão
     PartName = "HumanoidRootPart",
-    MaxDistance = 300,
+    MaxDistance = 200, -- até onde ele procura um alvo quando você aperta o botão (fixo)
 }
 
 local LockGui, LockButton
+local LockDotGui, LockDotFrame -- ponto que aparece no alvo
+local LockDot = { Size = 8 } -- tamanho do ponto em pixels (dropdown "Ponto do Lock On")
+local LOCK_DOT_SIZES = { Fino = 4, ["Médio"] = 8, Grosso = 12, Grande = 18 }
 local BUTTON_SIZE = 64
 local DRAG_THRESHOLD = 8 -- pixels que o dedo precisa mover para contar como arraste
 
@@ -329,23 +333,32 @@ local function findNearestTarget()
     return best
 end
 
-local function refreshLockButton()
-    if not LockButton then
+local BTN_ON_BG = Color3.fromRGB(24, 60, 38)
+local BTN_OFF_BG = Color3.fromRGB(14, 14, 16)
+local BTN_ON_STROKE = Color3.fromRGB(70, 255, 110)
+local BTN_OFF_STROKE = Color3.fromRGB(255, 255, 255)
+local BTN_TWEEN = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- Texto e cor de um botão flutuante (ligado/desligado), com transição suave
+local function setButtonState(btn, active, text)
+    if not btn then
         return
     end
-    local stroke = LockButton:FindFirstChildOfClass("UIStroke")
-    if LockOn.Active then
-        LockButton.Text = "LOCK\nON"
-        LockButton.BackgroundColor3 = Color3.fromRGB(24, 60, 38)
-        if stroke then
-            stroke.Color = Color3.fromRGB(70, 255, 110)
-        end
-    else
-        LockButton.Text = "LOCK\nOFF"
-        LockButton.BackgroundColor3 = Color3.fromRGB(14, 14, 16)
-        if stroke then
-            stroke.Color = Color3.fromRGB(255, 255, 255)
-        end
+    btn.Text = text
+    TweenService:Create(btn, BTN_TWEEN, { BackgroundColor3 = active and BTN_ON_BG or BTN_OFF_BG }):Play()
+    local stroke = btn:FindFirstChildOfClass("UIStroke")
+    if stroke then
+        TweenService:Create(stroke, BTN_TWEEN, { Color = active and BTN_ON_STROKE or BTN_OFF_STROKE }):Play()
+    end
+end
+
+local function refreshLockButton()
+    setButtonState(LockButton, LockOn.Active, LockOn.Active and "LOCK\nON" or "LOCK\nOFF")
+end
+
+local function hideLockDot()
+    if LockDotFrame then
+        LockDotFrame.Visible = false
     end
 end
 
@@ -369,6 +382,9 @@ local function setLockActive(active)
         LockOn.Active = false
     end
     refreshLockButton()
+    if not LockOn.Active then
+        hideLockDot()
+    end
 end
 
 -- Coloca uma ScreenGui na tela: gethui/CoreGui (se o executor permitir), senão PlayerGui
@@ -476,6 +492,23 @@ local function createFloatingButton(name, text, posX, posY, onClick)
     stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     stroke.Parent = btn
 
+    -- Feedback ao tocar: a borda engrossa enquanto o dedo está apertando
+    btn.InputBegan:Connect(function(input)
+        local t = input.UserInputType
+        if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then
+            return
+        end
+        TweenService:Create(stroke, BTN_TWEEN, { Thickness = 4 }):Play()
+        local conn
+        conn = input.Changed:Connect(function()
+            if input.UserInputState ~= Enum.UserInputState.End then
+                return
+            end
+            conn:Disconnect()
+            TweenService:Create(stroke, BTN_TWEEN, { Thickness = 2 }):Play()
+        end)
+    end)
+
     mountGui(gui)
     makeDraggable(gui, btn, onClick)
 
@@ -501,10 +534,70 @@ local function createLockGui()
     refreshLockButton()
 end
 
+-- Ponto (estilo mira do GTA) que fica em cima do alvo enquanto o Lock On está ativo
+local function createLockDot()
+    if LockDotGui then
+        return
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "BukLockDot"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 998
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local dot = Instance.new("Frame")
+    dot.Name = "Dot"
+    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dot.Size = UDim2.fromOffset(LockDot.Size, LockDot.Size)
+    dot.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+    dot.BorderSizePixel = 0
+    dot.Visible = false
+    dot.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = dot
+
+    -- Contorno escuro fininho: o ponto aparece em qualquer fundo
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Transparency = 0.2
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = dot
+
+    mountGui(gui)
+    LockDotGui, LockDotFrame = gui, dot
+end
+
+local function setLockDotSize(size)
+    LockDot.Size = size
+    if LockDotFrame then
+        LockDotFrame.Size = UDim2.fromOffset(size, size)
+    end
+end
+
+-- Põe o ponto em cima da parte travada (some se ela estiver fora da tela)
+local function updateLockDot(cam, part)
+    if not LockDotFrame then
+        return
+    end
+    local pos, onScreen = cam:WorldToViewportPoint(part.Position)
+    if onScreen then
+        LockDotFrame.Position = UDim2.fromOffset(pos.X, pos.Y)
+        LockDotFrame.Visible = true
+    else
+        LockDotFrame.Visible = false
+    end
+end
+
 local function setLockEnabled(state)
     LockOn.Enabled = state
     if state then
         createLockGui()
+        createLockDot()
         if LockGui then
             LockGui.Enabled = true
         end
@@ -542,20 +635,22 @@ RunService:BindToRenderStep("BukLockOn", Enum.RenderPriority.Camera.Value + 1, f
     -- Só desliga quando você apertar o botão.
     local part = getTargetPart(target)
     if not part then
+        hideLockDot()
         return
     end
 
     cam.CFrame = CFrame.lookAt(cam.CFrame.Position, part.Position)
+    updateLockDot(cam, part)
 end)
 
 ----------------------------------------------------------------
--- Combate: Virar pro Alvo
+-- Lock On: personagem sempre virado pro alvo
 ----------------------------------------------------------------
-local Combat = {
-    FaceTarget = false,
-}
-
 connect(RunService.Heartbeat, function()
+    if not (LockOn.Enabled and LockOn.Active and LockOn.Target) then
+        return
+    end
+
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -563,16 +658,121 @@ connect(RunService.Heartbeat, function()
         return
     end
 
-    -- Virar pro alvo do Lock On
-    if Combat.FaceTarget and LockOn.Enabled and LockOn.Active and LockOn.Target then
+    local part = getTargetPart(LockOn.Target)
+    if part then
+        local p = part.Position
+        local flat = Vector3.new(p.X, root.Position.Y, p.Z)
+        if (flat - root.Position).Magnitude > 0.5 then
+            root.CFrame = CFrame.lookAt(root.Position, flat)
+        end
+    end
+end)
+
+----------------------------------------------------------------
+-- Player: Shift Lock (botão flutuante)
+----------------------------------------------------------------
+local Shift = {
+    Enabled = false, -- toggle da aba Player (mostra o botão flutuante)
+    Active = false, -- Shift Lock ligado agora (botão apertado)
+    Offset = Vector3.new(1.75, 0, 0), -- câmera por cima do ombro (igual ao Shift Lock do Roblox)
+    Saved = setmetatable({}, { __mode = "k" }), -- Humanoid -> AutoRotate e CameraOffset de antes
+}
+
+local ShiftGui, ShiftButton
+
+local function refreshShiftButton()
+    setButtonState(ShiftButton, Shift.Active, Shift.Active and "SHIFT\nON" or "SHIFT\nOFF")
+end
+
+-- Devolve o personagem ao que era antes do Shift Lock
+local function restoreShift(hum)
+    local saved = hum and Shift.Saved[hum]
+    if not saved then
+        return
+    end
+    Shift.Saved[hum] = nil
+    pcall(function()
+        hum.AutoRotate = saved.AutoRotate
+        hum.CameraOffset = saved.CameraOffset
+    end)
+end
+
+local function setShiftActive(active)
+    Shift.Active = active
+    if not active then
+        local char = LocalPlayer.Character
+        restoreShift(char and char:FindFirstChildOfClass("Humanoid"))
+    end
+    refreshShiftButton()
+end
+
+local function createShiftGui()
+    if ShiftGui then
+        return
+    end
+    local cam = Workspace.CurrentCamera
+    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
+
+    -- Fica logo abaixo do botão do Lock On
+    ShiftGui, ShiftButton = createFloatingButton(
+        "BukShift",
+        "SHIFT\nOFF",
+        math.max(vp.X - BUTTON_SIZE - 240, 0),
+        math.clamp(vp.Y * 0.5 + BUTTON_SIZE / 2 + 16, 0, math.max(vp.Y - BUTTON_SIZE, 0)),
+        function()
+            setShiftActive(not Shift.Active)
+        end
+    )
+    ShiftButton.TextSize = 12
+    refreshShiftButton()
+end
+
+local function setShiftEnabled(state)
+    Shift.Enabled = state
+    if state then
+        createShiftGui()
+    else
+        setShiftActive(false)
+    end
+    if ShiftGui then
+        ShiftGui.Enabled = state
+    end
+end
+
+-- Roda logo depois da câmera (e do Lock On): o personagem vira pra onde a câmera aponta
+pcall(function()
+    RunService:UnbindFromRenderStep("BukShift")
+end)
+RunService:BindToRenderStep("BukShift", Enum.RenderPriority.Camera.Value + 2, function()
+    if not (Shift.Enabled and Shift.Active) then
+        return
+    end
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local cam = Workspace.CurrentCamera
+    if not (hum and root and cam) or hum.Health <= 0 or hum.Sit then
+        return
+    end
+
+    if not Shift.Saved[hum] then
+        Shift.Saved[hum] = { AutoRotate = hum.AutoRotate, CameraOffset = hum.CameraOffset }
+    end
+    hum.AutoRotate = false
+    hum.CameraOffset = hum.CameraOffset:Lerp(Shift.Offset, 0.3)
+
+    -- Com o Lock On ativo, vira pro alvo; senão, pra onde a câmera aponta
+    local dir = cam.CFrame.LookVector
+    if LockOn.Enabled and LockOn.Active and LockOn.Target then
         local part = getTargetPart(LockOn.Target)
         if part then
-            local p = part.Position
-            local flat = Vector3.new(p.X, root.Position.Y, p.Z)
-            if (flat - root.Position).Magnitude > 0.5 then
-                root.CFrame = CFrame.lookAt(root.Position, flat)
-            end
+            dir = part.Position - root.Position
         end
+    end
+    dir = Vector3.new(dir.X, 0, dir.Z)
+    if dir.Magnitude > 0.01 then
+        root.CFrame = CFrame.lookAt(root.Position, root.Position + dir)
     end
 end)
 
@@ -941,7 +1141,7 @@ local function Unload()
     LockOn.Enabled = false
     LockOn.Active = false
     LockOn.Target = nil
-    Combat.FaceTarget = false
+    setShiftEnabled(false)
     setFOVEnabled(false)
     setBrightEnabled(false)
     setCamLockEnabled(false)
@@ -951,12 +1151,27 @@ local function Unload()
     pcall(function()
         RunService:UnbindFromRenderStep("BukLockOn")
     end)
+    pcall(function()
+        RunService:UnbindFromRenderStep("BukShift")
+    end)
     if LockGui then
         pcall(function()
             LockGui:Destroy()
         end)
         LockGui = nil
         LockButton = nil
+    end
+    if LockDotGui then
+        pcall(function()
+            LockDotGui:Destroy()
+        end)
+        LockDotGui, LockDotFrame = nil, nil
+    end
+    if ShiftGui then
+        pcall(function()
+            ShiftGui:Destroy()
+        end)
+        ShiftGui, ShiftButton = nil, nil
     end
     for _, key in ipairs({ "Name", "Health", "BoxCorner" }) do
         State.ESP[key] = false
@@ -1041,6 +1256,17 @@ if not Window then
     return
 end
 
+-- Botão de abrir o menu (celular) no mesmo estilo escuro do tema
+pcall(function()
+    Window:EditOpenButton({
+        Title = "Buk",
+        Icon = "swords",
+        CornerRadius = UDim.new(0, 16),
+        StrokeThickness = 2,
+        Color = ColorSequence.new(Color3.fromHex("#ffffff"), Color3.fromHex("#8a8a93")),
+    })
+end)
+
 -- O WindUI calcula o tamanho (escala) da janela só uma vez, na hora que ela abre. Se a tela
 -- ainda estava mudando nesse momento (jogo carregando, celular girando), a janela fica grande
 -- ou pequena demais e bugada. Aqui a escala é recalculada sempre que o tamanho da tela muda.
@@ -1107,6 +1333,7 @@ local MainTab = Window:Tab({
 
 MainTab:Toggle({
     Title = "Full Bright",
+    Icon = "sun",
     Desc = "Clareia o mapa e tira a névoa pra você enxergar tudo, até nos lugares escuros.",
     Flag = "main_fullbright",
     Value = false,
@@ -1148,6 +1375,7 @@ local PlayerTab = Window:Tab({
 
 PlayerTab:Toggle({
     Title = "CFrame Speed",
+    Icon = "zap",
     Flag = "cframe_speed",
     Value = false,
     Callback = function(state)
@@ -1163,6 +1391,17 @@ PlayerTab:Slider({
     Callback = function(value)
         -- clamp: se uma config antiga salva (ex: 300) for carregada, não passa do limite novo
         State.SpeedValue = math.clamp(value, 1, 150)
+    end,
+})
+
+PlayerTab:Toggle({
+    Title = "Shift Lock",
+    Desc = "Mostra um botão flutuante. Toque nele pra ligar/desligar: o personagem fica sempre virado pra onde a câmera aponta e a câmera fica por cima do ombro. Serve pros jogos que não têm Shift Lock.",
+    Icon = "lock",
+    Flag = "shiftlock_button",
+    Value = false,
+    Callback = function(state)
+        setShiftEnabled(state)
     end,
 })
 
@@ -1234,7 +1473,8 @@ local LockSection = PainelTab:Section({ Title = "Lock On", Opened = true })
 
 LockSection:Toggle({
     Title = "Lock On",
-    Desc = "Mostra um botão flutuante. Aperte nele para travar a câmera no player mais próximo. A trava continua mesmo se o alvo morrer; só desliga quando você apertar o botão de novo.",
+    Desc = "Mostra um botão flutuante. Aperte nele para travar a câmera no player mais próximo (até 200 studs). Seu personagem fica virado pro alvo e aparece um ponto nele. A trava continua mesmo se o alvo morrer; só desliga quando você apertar o botão de novo.",
+    Icon = "crosshair",
     Flag = "lockon_enabled",
     Value = false,
     Callback = function(state)
@@ -1244,21 +1484,11 @@ LockSection:Toggle({
 
 LockSection:Toggle({
     Title = "Travar Botão",
-    Desc = "Deixa o botão flutuante do Lock On parado: ele não anda mais quando você toca.",
+    Desc = "Deixa os botões flutuantes (Lock On e Shift Lock) parados: eles não andam mais quando você toca.",
     Flag = "lockon_button_locked",
     Value = false,
     Callback = function(state)
         LockOn.ButtonLocked = state
-    end,
-})
-
-LockSection:Toggle({
-    Title = "Virar pro Alvo",
-    Desc = "Com o Lock On ativo, seu personagem fica virado pro alvo (as skills saem na direção dele).",
-    Flag = "lockon_face",
-    Value = false,
-    Callback = function(state)
-        Combat.FaceTarget = state
     end,
 })
 
@@ -1272,14 +1502,14 @@ LockSection:Dropdown({
     end,
 })
 
-LockSection:Slider({
-    Title = "Distância máxima do Lock On",
-    Desc = "Até onde ele procura o player quando você aperta o botão. Depois de travado, a distância não importa mais.",
-    Flag = "lockon_max_distance",
-    Step = 10,
-    Value = { Min = 20, Max = 1000, Default = 300 },
-    Callback = function(value)
-        LockOn.MaxDistance = value
+LockSection:Dropdown({
+    Title = "Ponto do Lock On",
+    Desc = "Ponto que aparece no alvo quando o Lock On está ativo. Escolha a espessura.",
+    Values = { "Fino", "Médio", "Grosso", "Grande" },
+    Value = "Médio",
+    Flag = "lockon_dot_size",
+    Callback = function(selected)
+        setLockDotSize(LOCK_DOT_SIZES[selected] or 8)
     end,
 })
 
