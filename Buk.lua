@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Full Bright, Trocar de Servidor) | Player (CFrame Speed até 150, Shift Lock) | Esp | Painel (Lock On) | Mod (Câmera) | Settings
+    Abas: Main (Full Bright, Trocar de Servidor) | Player (CFrame Speed até 1000, Shift Lock) | Esp | Painel (Lock On) | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -44,7 +44,10 @@ local State = {
     ESP = {
         Name = false,
         Health = false,
+        Distance = false,
         BoxCorner = false,
+        Tracer = false,
+        TeamCheck = false,
         MaxDistance = 2000,
         Color = Color3.fromRGB(255, 255, 255), -- branco (padrão)
     },
@@ -74,7 +77,7 @@ local function notifyOnce(key, title, content)
 end
 
 ----------------------------------------------------------------
--- ESP (Drawing API): Name, Health e Box Corner
+-- ESP (Drawing API): Name, Health (barra), Distância, Box Corner e Linha
 ----------------------------------------------------------------
 local DrawingSupported = false
 do
@@ -90,6 +93,9 @@ do
 end
 
 local ESPObjects = {}
+local ESP_PARTS = { "Name", "Health", "Distance", "BarBack", "Bar", "Tracer" }
+local HP_LOW = Color3.fromRGB(255, 60, 60)
+local HP_FULL = Color3.fromRGB(70, 255, 110)
 
 local function newDrawing(class, props)
     local obj = Drawing.new(class)
@@ -117,6 +123,10 @@ local function createESP(plr)
     local obj = {
         Name = newDrawing("Text", { Size = 14, Center = true, Outline = true, Visible = false }),
         Health = newDrawing("Text", { Size = 13, Center = true, Outline = true, Visible = false }),
+        Distance = newDrawing("Text", { Size = 13, Center = true, Outline = true, Visible = false }),
+        BarBack = newDrawing("Line", { Thickness = 5, Color = Color3.fromRGB(0, 0, 0), Visible = false }),
+        Bar = newDrawing("Line", { Thickness = 3, Visible = false }),
+        Tracer = newDrawing("Line", { Thickness = 1, Visible = false }),
         Corners = {},
     }
     for i = 1, 8 do
@@ -128,8 +138,9 @@ local function createESP(plr)
 end
 
 local function hideESP(obj)
-    obj.Name.Visible = false
-    obj.Health.Visible = false
+    for _, key in ipairs(ESP_PARTS) do
+        obj[key].Visible = false
+    end
     for _, l in ipairs(obj.Corners) do
         l.Visible = false
     end
@@ -147,8 +158,9 @@ local function removeESP(plr)
             d:Remove()
         end)
     end
-    rm(obj.Name)
-    rm(obj.Health)
+    for _, key in ipairs(ESP_PARTS) do
+        rm(obj[key])
+    end
     for _, l in ipairs(obj.Corners) do
         rm(l)
     end
@@ -164,10 +176,16 @@ local function updateESP(plr, obj, cfg)
         return hideESP(obj)
     end
 
+    -- Ignorar meu time (só faz efeito em jogo que tem times)
+    if cfg.TeamCheck and plr.Team ~= nil and plr.Team == LocalPlayer.Team then
+        return hideESP(obj)
+    end
+
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local origin = myRoot and myRoot.Position or Camera.CFrame.Position
-    if (origin - root.Position).Magnitude > cfg.MaxDistance then
+    local dist = (origin - root.Position).Magnitude
+    if dist > cfg.MaxDistance then
         return hideESP(obj)
     end
 
@@ -186,6 +204,7 @@ local function updateESP(plr, obj, cfg)
     local x1, x2 = cx - width / 2, cx + width / 2
     local y1, y2 = topV.Y, botV.Y
     local color = cfg.Color
+    local below = y2 + 2 -- onde começa o texto embaixo da caixa
 
     -- 1. Esp Name
     if cfg.Name then
@@ -197,19 +216,45 @@ local function updateESP(plr, obj, cfg)
         obj.Name.Visible = false
     end
 
-    -- 2. Esp Health (vida atual / vida máxima)
+    -- 2. Esp Health: barra do lado esquerdo da caixa + vida atual/máxima embaixo
     if cfg.Health then
-        local maxHp = math.max(hum.MaxHealth, 1)
-        local ratio = math.clamp(hum.Health / maxHp, 0, 1)
+        local ratio = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+        local hpColor = HP_LOW:Lerp(HP_FULL, ratio)
+        local bx = math.floor(x1 - 6)
+
+        setLine(obj.BarBack, bx, y1 - 1, bx, y2 + 1, Color3.fromRGB(0, 0, 0))
+        setLine(obj.Bar, bx, y2, bx, y2 - (y2 - y1) * ratio, hpColor)
+
         obj.Health.Text = string.format("%d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
-        obj.Health.Position = Vector2.new(cx, y2 + 2)
-        obj.Health.Color = Color3.fromRGB(255, 60, 60):Lerp(Color3.fromRGB(70, 255, 110), ratio)
+        obj.Health.Position = Vector2.new(cx, below)
+        obj.Health.Color = hpColor
         obj.Health.Visible = true
+        below += 14
     else
+        obj.BarBack.Visible = false
+        obj.Bar.Visible = false
         obj.Health.Visible = false
     end
 
-    -- 3. Esp Box Corner
+    -- 3. Esp Distância (em studs, embaixo da caixa)
+    if cfg.Distance then
+        obj.Distance.Text = string.format("[%d]", math.floor(dist))
+        obj.Distance.Position = Vector2.new(cx, below)
+        obj.Distance.Color = color
+        obj.Distance.Visible = true
+    else
+        obj.Distance.Visible = false
+    end
+
+    -- 4. Esp Linha: do meio de baixo da tela até os pés do player
+    if cfg.Tracer then
+        local vp = Camera.ViewportSize
+        setLine(obj.Tracer, vp.X / 2, vp.Y, cx, y2, color)
+    else
+        obj.Tracer.Visible = false
+    end
+
+    -- 5. Esp Box Corner
     if cfg.BoxCorner then
         local l = math.max(4, math.min(width, height) * 0.28)
         local c = obj.Corners
@@ -239,7 +284,7 @@ connect(RunService.RenderStepped, function()
     end
 
     local cfg = State.ESP
-    local anyOn = cfg.Name or cfg.Health or cfg.BoxCorner
+    local anyOn = cfg.Name or cfg.Health or cfg.Distance or cfg.BoxCorner or cfg.Tracer
 
     if anyOn then
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -761,20 +806,13 @@ connect(RunService.Heartbeat, function()
 end)
 
 ----------------------------------------------------------------
--- Player: Shift Lock (botão flutuante)
+-- Player: Shift Lock
 ----------------------------------------------------------------
 local Shift = {
-    Enabled = false, -- toggle da aba Player (mostra o botão flutuante)
-    Active = false, -- Shift Lock ligado agora (botão apertado)
+    Active = false, -- ligado pelo toggle da aba Player
     Offset = Vector3.new(1.75, 0, 0), -- câmera por cima do ombro (igual ao Shift Lock do Roblox)
     Saved = setmetatable({}, { __mode = "k" }), -- Humanoid -> AutoRotate e CameraOffset de antes
 }
-
-local ShiftGui, ShiftButton
-
-local function refreshShiftButton()
-    setButtonState(ShiftButton, Shift.Active, Shift.Active and "SHIFT\nON" or "SHIFT\nOFF")
-end
 
 -- Devolve o personagem ao que era antes do Shift Lock
 local function restoreShift(hum)
@@ -795,40 +833,6 @@ local function setShiftActive(active)
         local char = LocalPlayer.Character
         restoreShift(char and char:FindFirstChildOfClass("Humanoid"))
     end
-    refreshShiftButton()
-end
-
-local function createShiftGui()
-    if ShiftGui then
-        return
-    end
-    local cam = Workspace.CurrentCamera
-    local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
-
-    -- Fica logo abaixo do botão do Lock On
-    ShiftGui, ShiftButton = createFloatingButton(
-        "BukShift",
-        "SHIFT\nOFF",
-        math.max(vp.X - BUTTON_SIZE - 240, 0),
-        math.clamp(vp.Y * 0.5 + BUTTON_SIZE / 2 + 16, 0, math.max(vp.Y - BUTTON_SIZE, 0)),
-        function()
-            setShiftActive(not Shift.Active)
-        end
-    )
-    ShiftButton.TextSize = 12
-    refreshShiftButton()
-end
-
-local function setShiftEnabled(state)
-    Shift.Enabled = state
-    if state then
-        createShiftGui()
-    else
-        setShiftActive(false)
-    end
-    if ShiftGui then
-        ShiftGui.Enabled = state
-    end
 end
 
 -- Roda logo depois da câmera (e do Lock On): o personagem vira pra onde a câmera aponta
@@ -836,7 +840,7 @@ pcall(function()
     RunService:UnbindFromRenderStep("BukShift")
 end)
 RunService:BindToRenderStep("BukShift", Enum.RenderPriority.Camera.Value + 2, function()
-    if not (Shift.Enabled and Shift.Active) then
+    if not Shift.Active then
         return
     end
 
@@ -1233,7 +1237,7 @@ local function Unload()
     LockOn.Enabled = false
     LockOn.Active = false
     LockOn.Target = nil
-    setShiftEnabled(false)
+    setShiftActive(false)
     setFOVEnabled(false)
     setBrightEnabled(false)
     setCamLockEnabled(false)
@@ -1259,13 +1263,7 @@ local function Unload()
         end)
         LockDotGui, LockDotFrame = nil, nil
     end
-    if ShiftGui then
-        pcall(function()
-            ShiftGui:Destroy()
-        end)
-        ShiftGui, ShiftButton = nil, nil
-    end
-    for _, key in ipairs({ "Name", "Health", "BoxCorner" }) do
+    for _, key in ipairs({ "Name", "Health", "Distance", "BoxCorner", "Tracer", "TeamCheck" }) do
         State.ESP[key] = false
     end
 
@@ -1426,7 +1424,6 @@ local MainTab = Window:Tab({
 MainTab:Toggle({
     Title = "Full Bright",
     Icon = "sun",
-    Desc = "Clareia o mapa e tira a névoa pra você enxergar tudo, até nos lugares escuros.",
     Flag = "main_fullbright",
     Value = false,
     Callback = function(state)
@@ -1439,7 +1436,6 @@ local HopSection = MainTab:Section({ Title = "Servidor", Opened = true })
 
 HopSection:Dropdown({
     Title = "Servidor de destino",
-    Desc = "Mais cheio = o servidor com mais gente que ainda tem vaga.",
     Values = { "Mais cheio", "Mais vazio", "Aleatório" },
     Value = "Mais cheio",
     Flag = "hop_mode",
@@ -1450,7 +1446,6 @@ HopSection:Dropdown({
 
 HopSection:Button({
     Title = "Trocar de Servidor",
-    Desc = "Te leva pra outro servidor do jogo. Se o seu executor não deixar buscar a lista de servidores, só reentra no jogo.",
     Icon = "server",
     Callback = function()
         confirmHop()
@@ -1479,21 +1474,19 @@ PlayerTab:Slider({
     Title = "Velocidade",
     Flag = "cframe_speed_value",
     Step = 1,
-    Value = { Min = 1, Max = 150, Default = 30 },
+    Value = { Min = 1, Max = 1000, Default = 30 },
     Callback = function(value)
-        -- clamp: se uma config antiga salva (ex: 300) for carregada, não passa do limite novo
-        State.SpeedValue = math.clamp(value, 1, 150)
+        State.SpeedValue = math.clamp(value, 1, 1000)
     end,
 })
 
 PlayerTab:Toggle({
     Title = "Shift Lock",
-    Desc = "Mostra um botão flutuante. Toque nele pra ligar/desligar: o personagem fica sempre virado pra onde a câmera aponta e a câmera fica por cima do ombro. Serve pros jogos que não têm Shift Lock.",
     Icon = "lock",
-    Flag = "shiftlock_button",
+    Flag = "shift_lock",
     Value = false,
     Callback = function(state)
-        setShiftEnabled(state)
+        setShiftActive(state)
     end,
 })
 
@@ -1505,8 +1498,12 @@ local EspTab = Window:Tab({
     Icon = "eye",
 })
 
-EspTab:Toggle({
+----- Mostrar -----
+local EspShowSection = EspTab:Section({ Title = "Mostrar", Opened = true })
+
+EspShowSection:Toggle({
     Title = "Esp Name",
+    Icon = "user",
     Flag = "esp_name",
     Value = false,
     Callback = function(state)
@@ -1514,9 +1511,9 @@ EspTab:Toggle({
     end,
 })
 
-EspTab:Toggle({
+EspShowSection:Toggle({
     Title = "Esp Health",
-    Desc = "Mostra a vida no formato atual/máxima",
+    Icon = "heart",
     Flag = "esp_health",
     Value = false,
     Callback = function(state)
@@ -1524,8 +1521,19 @@ EspTab:Toggle({
     end,
 })
 
-EspTab:Toggle({
+EspShowSection:Toggle({
+    Title = "Esp Distância",
+    Icon = "ruler",
+    Flag = "esp_distance",
+    Value = false,
+    Callback = function(state)
+        State.ESP.Distance = state
+    end,
+})
+
+EspShowSection:Toggle({
     Title = "Esp Box Corner",
+    Icon = "scan",
     Flag = "esp_box_corner",
     Value = false,
     Callback = function(state)
@@ -1533,7 +1541,20 @@ EspTab:Toggle({
     end,
 })
 
-EspTab:Colorpicker({
+EspShowSection:Toggle({
+    Title = "Esp Linha",
+    Icon = "route",
+    Flag = "esp_tracer",
+    Value = false,
+    Callback = function(state)
+        State.ESP.Tracer = state
+    end,
+})
+
+----- Ajustes -----
+local EspCfgSection = EspTab:Section({ Title = "Ajustes", Opened = true })
+
+EspCfgSection:Colorpicker({
     Title = "Cor do Esp",
     Flag = "esp_color",
     Default = Color3.fromRGB(255, 255, 255),
@@ -1542,13 +1563,23 @@ EspTab:Colorpicker({
     end,
 })
 
-EspTab:Slider({
+EspCfgSection:Slider({
     Title = "Distância máxima",
     Flag = "esp_max_distance",
     Step = 50,
     Value = { Min = 100, Max = 5000, Default = 2000 },
     Callback = function(value)
         State.ESP.MaxDistance = value
+    end,
+})
+
+EspCfgSection:Toggle({
+    Title = "Ignorar Meu Time",
+    Icon = "users",
+    Flag = "esp_team_check",
+    Value = false,
+    Callback = function(state)
+        State.ESP.TeamCheck = state
     end,
 })
 
@@ -1565,7 +1596,6 @@ local LockSection = PainelTab:Section({ Title = "Lock On", Opened = true })
 
 LockSection:Toggle({
     Title = "Lock On",
-    Desc = "Mostra um botão flutuante. Aperte nele para travar a câmera no player mais próximo (até 200 studs). Seu personagem fica virado pro alvo e aparece um ponto nele. A trava continua mesmo se o alvo morrer; só desliga quando você apertar o botão de novo.",
     Icon = "crosshair",
     Flag = "lockon_enabled",
     Value = false,
@@ -1576,7 +1606,6 @@ LockSection:Toggle({
 
 LockSection:Toggle({
     Title = "Travar Botão",
-    Desc = "Deixa os botões flutuantes (Lock On e Shift Lock) parados: eles não andam mais quando você toca.",
     Flag = "lockon_button_locked",
     Value = false,
     Callback = function(state)
@@ -1596,7 +1625,6 @@ LockSection:Dropdown({
 
 LockSection:Dropdown({
     Title = "Ponto do Lock On",
-    Desc = "Mira (anel com ponto) que aparece no alvo quando o Lock On está ativo. Escolha o tamanho.",
     Values = { "Fino", "Médio", "Grosso", "Grande" },
     Value = "Médio",
     Flag = "lockon_dot_size",
@@ -1607,7 +1635,6 @@ LockSection:Dropdown({
 
 LockSection:Colorpicker({
     Title = "Cor do Ponto",
-    Desc = "Cor do ponto no meio do anel.",
     Flag = "lockon_dot_color",
     Default = Color3.fromRGB(255, 60, 60),
     Callback = function(color)
@@ -1628,7 +1655,6 @@ local CamSection = ModTab:Section({ Title = "Câmera", Opened = true })
 
 CamSection:Toggle({
     Title = "FOV",
-    Desc = "Aumenta o campo de visão pra enxergar mais longe. Fica travado: o Roblox e o jogo não conseguem mudar.",
     Flag = "fov_enabled",
     Value = false,
     Callback = function(state)
@@ -1649,7 +1675,6 @@ CamSection:Slider({
 
 CamSection:Toggle({
     Title = "Câmera Longe (Travada)",
-    Desc = "Deixa a câmera afastada na distância escolhida e trava: o zoom (pinça/scroll) não muda mais.",
     Flag = "cam_lock",
     Value = false,
     Callback = function(state)
@@ -1691,7 +1716,6 @@ AppearanceSection:Dropdown({
 
 AppearanceSection:Toggle({
     Title = "Janela transparente",
-    Desc = "Deixa o menu meio transparente. Se o jogo ficar aparecendo 'fantasma' por trás, deixe desligado.",
     Flag = "ui_transparent",
     Value = false,
     Callback = function(state)
