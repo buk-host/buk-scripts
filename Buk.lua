@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Trocar de Servidor) | Aimbot (1v1 e 2v2) | Player (CFrame Speed, Shift Lock) | Esp | Mod (Câmera) | Settings
+    Abas: Main (Trocar de Servidor) | Aimbot (1v1 até 4v4) | Player (CFrame Speed, Shift Lock) | Esp | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -58,15 +58,17 @@ local Aim = {
     Target = nil, -- Player travado
     Part = nil, -- parte do alvo que está sendo seguida neste frame (nil = sem alvo válido)
     ButtonLocked = false, -- impede arrastar os botões
-    Mode = "2v2", -- "1v1" | "2v2"
+    Mode = "4v4", -- "1v1" | "2v2" | "3v3" | "4v4" (limite de players por perto)
     PartName = "HumanoidRootPart",
-    Pick = "Perto de mim", -- "Perto de mim" | "Perto da mira"
+    Pick = "Perto de mim", -- primeiro alvo: "Perto de mim" | "Perto da mira"
+    OnKill = "Aleatório", -- quem pegar quando o alvo morre: "Aleatório" | "Perto de mim" | "Perto da mira"
     Smooth = 0, -- 0 = trava total; quanto maior, mais devagar a câmera gira
     MaxDistance = 200, -- alcance para procurar alvo
     WallCheck = false, -- ignora quem está atrás de parede na hora de escolher o alvo
     FaceTarget = true, -- personagem sempre virado pro alvo
     NextScan = 0,
     IdleSince = nil,
+    LastLock = nil, -- última vez que estava seguindo um alvo válido
 }
 
 local Connections = {}
@@ -108,7 +110,7 @@ end
 local function getTargetPart(plr)
     local char = plr.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then
+    if not hum or hum.Health <= 0 or hum:GetState() == Enum.HumanoidStateType.Dead then
         return nil
     end
     return char:FindFirstChild(Aim.PartName) or char:FindFirstChild("HumanoidRootPart")
@@ -123,8 +125,41 @@ local Allies = {
     CacheAt = 0,
 }
 
--- Só confia no Team do Roblox se existir alguém em outro time. Se o jogo deixa todo
--- mundo no mesmo time (ou sem time), o Team não ajuda a achar aliado e é ignorado.
+-- Chave de time lida dos atributos (do Player e do personagem) que têm "team" no nome.
+-- Serve para jogo que não usa o Team do Roblox mas guarda o time em atributo.
+local function attrTeamKey(plr)
+    local parts = {}
+    local function scan(inst)
+        if not inst then
+            return
+        end
+        local ok, attrs = pcall(function()
+            return inst:GetAttributes()
+        end)
+        if not ok then
+            return
+        end
+        for name, value in pairs(attrs) do
+            if string.find(string.lower(name), "team", 1, true) then
+                local t = typeof(value)
+                if t == "string" or t == "number" or t == "BrickColor" or t == "Color3" then
+                    table.insert(parts, name .. "=" .. tostring(value))
+                end
+            end
+        end
+    end
+    scan(plr)
+    scan(plr.Character)
+    if #parts == 0 then
+        return nil
+    end
+    table.sort(parts)
+    return table.concat(parts, ";")
+end
+
+-- Só confia no time (Team do Roblox ou atributo) se existir alguém em outro time. Se o jogo
+-- deixa todo mundo no mesmo time (ou sem time), isso não ajuda a achar aliado e é ignorado.
+-- No 1v1 não existe aliado, então nada é marcado.
 local function refreshAllies()
     local now = os.clock()
     if now - Allies.CacheAt < 0.2 then
@@ -132,15 +167,26 @@ local function refreshAllies()
     end
     Allies.CacheAt = now
 
-    local myTeam = LocalPlayer.Team
-    local all = Players:GetPlayers()
+    if Aim.Mode == "1v1" then
+        Allies.Cache = {}
+        return
+    end
 
-    local teamsUseful = false
-    if myTeam ~= nil then
-        for _, plr in ipairs(all) do
-            if plr ~= LocalPlayer and plr.Team ~= myTeam then
+    local myTeam = LocalPlayer.Team
+    local myKey = attrTeamKey(LocalPlayer)
+    local keys = {}
+    local teamsUseful, keysUseful = false, false
+
+    local all = Players:GetPlayers()
+    for _, plr in ipairs(all) do
+        if plr ~= LocalPlayer then
+            local key = attrTeamKey(plr)
+            keys[plr] = key
+            if myTeam ~= nil and plr.Team ~= myTeam then
                 teamsUseful = true
-                break
+            end
+            if myKey ~= nil and key ~= myKey then
+                keysUseful = true
             end
         end
     end
@@ -148,7 +194,9 @@ local function refreshAllies()
     local cache = {}
     for _, plr in ipairs(all) do
         if plr ~= LocalPlayer then
-            cache[plr] = (Allies.Manual[plr] == true) or (teamsUseful and plr.Team == myTeam)
+            cache[plr] = (Allies.Manual[plr] == true)
+                or (teamsUseful and plr.Team == myTeam)
+                or (keysUseful and keys[plr] == myKey)
         end
     end
     Allies.Cache = cache
@@ -159,12 +207,13 @@ local function isAlly(plr)
     return Allies.Cache[plr] == true
 end
 
--- Marca (ou desmarca) o player mais perto de mim como aliado
-local function toggleNearestAlly()
+-- Marca como aliado o player mais perto de mim que ainda não é aliado
+-- (no 3v3/4v4 dá pra apertar mais de uma vez, um aliado por toque)
+local function markNearestAsAlly()
     local origin = getOrigin()
     local best, bestDist = nil, math.huge
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
+        if plr ~= LocalPlayer and not isAlly(plr) then
             local char = plr.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if root then
@@ -177,24 +226,95 @@ local function toggleNearestAlly()
     end
 
     if not best then
-        WindUI:Notify({ Title = "Aimbot", Content = "Ninguém por perto.", Duration = 2 })
+        WindUI:Notify({ Title = "Aimbot", Content = "Ninguém por perto para marcar.", Duration = 2 })
         return
     end
 
-    if Allies.Manual[best] then
-        Allies.Manual[best] = nil
-        WindUI:Notify({ Title = "Aimbot", Content = best.DisplayName .. " não é mais aliado.", Duration = 2 })
-    else
-        Allies.Manual[best] = true
-        WindUI:Notify({ Title = "Aimbot", Content = best.DisplayName .. " marcado como aliado.", Duration = 2 })
-    end
+    Allies.Manual[best] = true
     Allies.CacheAt = 0
+    WindUI:Notify({ Title = "Aimbot", Content = best.DisplayName .. " marcado como aliado.", Duration = 2 })
+end
+
+-- Marca como aliado quem o aimbot está seguindo agora (o aimbot já pula pro próximo inimigo)
+local function markCurrentAsAlly()
+    local target = Aim.Target
+    if not (Aim.Active and target) then
+        WindUI:Notify({ Title = "Aimbot", Content = "Nenhum alvo travado no momento.", Duration = 2 })
+        return
+    end
+    Allies.Manual[target] = true
+    Allies.CacheAt = 0
+    WindUI:Notify({ Title = "Aimbot", Content = target.DisplayName .. " marcado como aliado.", Duration = 2 })
 end
 
 local function clearAllies()
     table.clear(Allies.Manual)
     Allies.CacheAt = 0
     WindUI:Notify({ Title = "Aimbot", Content = "Aliados marcados foram limpos.", Duration = 2 })
+end
+
+-- Diagnóstico: junta o que o jogo guarda de time/atributos de cada player e copia pro clipboard.
+-- Serve pra descobrir como o jogo separa os times se a detecção automática falhar.
+local function dumpPlayers()
+    local function attrs(inst)
+        local out = {}
+        local ok, a = pcall(function()
+            return inst:GetAttributes()
+        end)
+        if ok then
+            for k, v in pairs(a) do
+                table.insert(out, k .. "=" .. tostring(v))
+            end
+        end
+        table.sort(out)
+        return table.concat(out, ", ")
+    end
+
+    local lines = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local char = plr.Character
+        local extra = {}
+        if char then
+            for _, child in ipairs(char:GetChildren()) do
+                if
+                    not child:IsA("BasePart")
+                    and not child:IsA("Accessory")
+                    and not child:IsA("Humanoid")
+                    and not child:IsA("Clothing")
+                    and not child:IsA("CharacterMesh")
+                    and #extra < 15
+                then
+                    table.insert(extra, child.ClassName .. ":" .. child.Name)
+                end
+            end
+        end
+        table.insert(
+            lines,
+            string.format(
+                "%s%s | Team=%s | TeamColor=%s | attrs[%s] | charAttrs[%s] | char[%s]",
+                plr == LocalPlayer and "(EU) " or "",
+                plr.Name,
+                plr.Team and plr.Team.Name or "nil",
+                tostring(plr.TeamColor),
+                attrs(plr),
+                char and attrs(char) or "",
+                table.concat(extra, ", ")
+            )
+        )
+    end
+
+    local text = table.concat(lines, "\n")
+    local copied = false
+    if setclipboard then
+        copied = pcall(setclipboard, text)
+    end
+    print(text)
+    WindUI:Notify({
+        Title = "Aimbot",
+        Content = copied and "Info dos players copiada. Cole no chat."
+            or "Sem clipboard no executor: a info saiu no console (F9).",
+        Duration = 4,
+    })
 end
 
 connect(Players.PlayerRemoving, function(plr)
@@ -456,9 +576,9 @@ local SwitchGui, SwitchButton -- botão TROCA ALVO (só no 2v2)
 local AimDotGui, AimDotFrame -- mira (anel + ponto) que aparece no alvo
 
 -- Quantos players (aliados + inimigos) podem estar por perto para o aimbot ligar.
--- 1v1 = 1 player, 2v2 = 3 players (1 aliado + 2 inimigos). Mais que isso (lobby, 3v3, 4v4...)
--- o aimbot não liga, assim ele não puxa a câmera pra qualquer um.
-local MAX_NEAR = { ["1v1"] = 1, ["2v2"] = 3 }
+-- 1v1 = 1, 2v2 = 3, 3v3 = 5, 4v4 = 7 (todo mundo menos eu). Mais que isso (lobby cheio,
+-- outra partida do lado) o aimbot não liga, assim ele não puxa a câmera pra qualquer um.
+local MAX_NEAR = { ["1v1"] = 1, ["2v2"] = 3, ["3v3"] = 5, ["4v4"] = 7 }
 local IDLE_OFF_AFTER = 8 -- segundos sem nenhum inimigo até o aimbot se desligar sozinho
 
 -- Tamanhos do dropdown "Tamanho da mira": anel (px), ponto do meio (px) e espessura do anel
@@ -489,7 +609,8 @@ end
 
 -- Inimigos vivos dentro do alcance (sem aliados), do melhor para o pior alvo.
 -- Também devolve quantos players (aliados ou não) estão por perto, para o limite do modo.
-local function scanEnemies()
+local function scanEnemies(pick)
+    pick = pick or Aim.Pick
     local cam = Workspace.CurrentCamera
     local origin = getOrigin()
     local vp = cam and cam.ViewportSize or Vector2.new(800, 600)
@@ -505,7 +626,7 @@ local function scanEnemies()
                     near += 1
                     if not isAlly(plr) and (not Aim.WallCheck or not cam or isVisible(cam, plr, part)) then
                         local score = dist
-                        if Aim.Pick == "Perto da mira" and cam then
+                        if pick == "Perto da mira" and cam then
                             local pos, onScreen = cam:WorldToViewportPoint(part.Position)
                             if onScreen then
                                 score = (Vector2.new(pos.X, pos.Y) - center).Magnitude
@@ -527,7 +648,7 @@ local function scanEnemies()
 end
 
 local function overLimit(near)
-    return near > (MAX_NEAR[Aim.Mode] or 3)
+    return near > (MAX_NEAR[Aim.Mode] or 7)
 end
 
 local BTN_ON_BG = Color3.fromRGB(24, 60, 38)
@@ -555,7 +676,7 @@ end
 
 local function refreshSwitchVisibility()
     if SwitchGui then
-        SwitchGui.Enabled = Aim.Enabled and Aim.Mode == "2v2"
+        SwitchGui.Enabled = Aim.Enabled and Aim.Mode ~= "1v1"
     end
 end
 
@@ -587,6 +708,7 @@ local function setAimActive(active)
             Aim.Target = enemies[1].plr
             Aim.Active = true
             Aim.IdleSince = nil
+            Aim.LastLock = os.clock()
         end
     else
         Aim.Target, Aim.Active = nil, false
@@ -599,28 +721,35 @@ local function setAimActive(active)
     end
 end
 
--- Troca para o outro inimigo (2v2). Se o aimbot estiver desligado, liga.
+-- Troca pro próximo inimigo vivo (botão TROCA ALVO). Se o aimbot estiver desligado, liga.
+-- A ordem do ciclo é fixa (por UserId), então com 3-4 inimigos ele passa por todos.
 local function switchTarget()
-    local enemies, near = scanEnemies()
-    if overLimit(near) or #enemies == 0 then
-        setAimActive(true) -- só para mostrar o aviso certo
+    if not (Aim.Active and Aim.Target) then
+        setAimActive(true)
         return
     end
 
+    local enemies = scanEnemies()
+    if #enemies == 0 then
+        notifyOnce("aimNone", "Aimbot", "Nenhum inimigo por perto.")
+        return
+    end
+
+    table.sort(enemies, function(a, b)
+        return a.plr.UserId < b.plr.UserId
+    end)
+
     local nextTarget = enemies[1].plr
-    if Aim.Active and Aim.Target then
-        for i, e in ipairs(enemies) do
-            if e.plr == Aim.Target then
-                nextTarget = enemies[i % #enemies + 1].plr
-                break
-            end
+    for i, e in ipairs(enemies) do
+        if e.plr == Aim.Target then
+            nextTarget = enemies[i % #enemies + 1].plr
+            break
         end
     end
 
     Aim.Target = nextTarget
-    Aim.Active = true
     Aim.IdleSince = nil
-    refreshAimButton()
+    Aim.LastLock = os.clock()
     hideAimDot() -- a mira reaparece no novo alvo com a animação
 end
 
@@ -970,26 +1099,30 @@ RunService:BindToRenderStep("BukAim", Enum.RenderPriority.Last.Value, function(d
     end
     local now = os.clock()
 
-    -- O alvo atual ainda vale? (no servidor, vivo, não virou aliado e não foi parar longe)
+    -- O alvo atual ainda vale? (no servidor, vivo, não é aliado e não foi parar longe)
     local part = nil
     local target = Aim.Target
     if target and target.Parent == Players and not isAlly(target) then
         part = getTargetPart(target)
-        if part and (part.Position - getOrigin()).Magnitude > Aim.MaxDistance * 2 then
-            part = nil -- foi pra longe (acabou a partida / voltou pro lobby)
+        if part and (part.Position - getOrigin()).Magnitude > Aim.MaxDistance * 1.25 then
+            part = nil -- saiu da luta (foi pro lobby / espectador)
         end
     end
 
-    -- Sem alvo válido: procura o próximo inimigo (no 2v2, passa direto pro outro).
-    -- Se ficar um tempo sem nenhum inimigo, o aimbot se desliga sozinho.
+    -- Sem alvo válido (você matou, ele saiu, virou aliado...): puxa pra outro inimigo VIVO,
+    -- nunca pro seu time. Se ficar um tempo sem nenhum inimigo, o aimbot se desliga sozinho.
     if not part then
         Aim.Part = nil
         hideAimDot()
         if now >= Aim.NextScan then
-            Aim.NextScan = now + 0.25
-            local enemies, near = scanEnemies()
-            if #enemies > 0 and not overLimit(near) then
-                Aim.Target = enemies[1].plr
+            Aim.NextScan = now + 0.2
+            local kill = Aim.OnKill
+            local enemies, near = scanEnemies(kill == "Aleatório" and "Perto de mim" or kill)
+            -- no meio da luta o limite de players não bloqueia a troca (só vale pra ligar do zero)
+            local fighting = Aim.LastLock ~= nil and now - Aim.LastLock < IDLE_OFF_AFTER
+            if #enemies > 0 and (fighting or not overLimit(near)) then
+                local pick = (kill == "Aleatório") and enemies[math.random(#enemies)] or enemies[1]
+                Aim.Target = pick.plr
                 Aim.IdleSince = nil
             else
                 Aim.Target = nil
@@ -1004,6 +1137,7 @@ RunService:BindToRenderStep("BukAim", Enum.RenderPriority.Last.Value, function(d
     end
 
     Aim.Part = part
+    Aim.LastLock = now
     Aim.IdleSince = nil
 
     local camPos = cam.CFrame.Position
@@ -1625,9 +1759,9 @@ AimMainSection:Toggle({
 
 AimMainSection:Dropdown({
     Title = "Modo da partida",
-    Desc = "1v1: liga só com 1 player por perto. 2v2: aceita até 3 (1 aliado + 2 inimigos) e mostra o botão TROCA ALVO.",
-    Values = { "1v1", "2v2" },
-    Value = "2v2",
+    Desc = "Limite de players por perto pra ligar (1v1=1, 2v2=3, 3v3=5, 4v4=7). 4v4 serve pra todos os modos. A partir do 2v2 aparece o botão TROCA ALVO.",
+    Values = { "1v1", "2v2", "3v3", "4v4" },
+    Value = "4v4",
     Flag = "aim_mode",
     Callback = function(selected)
         Aim.Mode = selected
@@ -1659,13 +1793,24 @@ AimCfgSection:Dropdown({
 })
 
 AimCfgSection:Dropdown({
-    Title = "Escolher alvo",
-    Desc = "Qual inimigo o aimbot pega primeiro quando você liga.",
+    Title = "Primeiro alvo",
+    Desc = "Qual inimigo o aimbot pega quando você aperta AIM.",
     Values = { "Perto de mim", "Perto da mira" },
     Value = "Perto de mim",
     Flag = "aim_pick",
     Callback = function(selected)
         Aim.Pick = selected
+    end,
+})
+
+AimCfgSection:Dropdown({
+    Title = "Ao matar o alvo",
+    Desc = "Quem o aimbot pega quando o alvo morre. Sempre um inimigo vivo, nunca o seu time.",
+    Values = { "Aleatório", "Perto de mim", "Perto da mira" },
+    Value = "Aleatório",
+    Flag = "aim_on_kill",
+    Callback = function(selected)
+        Aim.OnKill = selected
     end,
 })
 
@@ -1710,15 +1855,24 @@ AimCfgSection:Toggle({
     end,
 })
 
------ Aliados (2v2) -----
-local AimAllySection = AimTab:Section({ Title = "Aliados (2v2)", Opened = true })
+----- Aliados (2v2 a 4v4) -----
+local AimAllySection = AimTab:Section({ Title = "Aliados (2v2 a 4v4)", Opened = true })
+
+AimAllySection:Button({
+    Title = "Marcar alvo atual como aliado",
+    Desc = "Use se o aimbot travar no seu parceiro: marca ele e já pula pro próximo inimigo.",
+    Icon = "user-check",
+    Callback = function()
+        markCurrentAsAlly()
+    end,
+})
 
 AimAllySection:Button({
     Title = "Marcar Aliado (mais perto)",
-    Desc = "Use se o aimbot mirar no seu parceiro: marca (ou desmarca) quem está mais perto de você.",
+    Desc = "Marca quem está mais perto de você e ainda não é aliado. Aperte de novo pra marcar o próximo.",
     Icon = "users",
     Callback = function()
-        toggleNearestAlly()
+        markNearestAsAlly()
     end,
 })
 
@@ -1727,6 +1881,15 @@ AimAllySection:Button({
     Icon = "eraser",
     Callback = function()
         clearAllies()
+    end,
+})
+
+AimAllySection:Button({
+    Title = "Copiar info dos players",
+    Desc = "Diagnóstico: se o aimbot errar o time, aperte aqui e cole o texto no chat pra eu ajustar.",
+    Icon = "clipboard",
+    Callback = function()
+        dumpPlayers()
     end,
 })
 
