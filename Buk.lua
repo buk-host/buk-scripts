@@ -58,6 +58,7 @@ local Aim = {
     Target = nil, -- Player travado
     Part = nil, -- parte do alvo que está sendo seguida neste frame (nil = sem alvo válido)
     ButtonLocked = false, -- impede arrastar os botões
+    SwitchEnabled = true, -- mostra o botão TROCA ALVO (toggle separado do Aimbot)
     Mode = "4v4", -- "1v1" | "2v2" | "3v3" | "4v4" (limite de players por perto)
     PartName = "HumanoidRootPart",
     Pick = "Perto de mim", -- primeiro alvo: "Perto de mim" | "Perto da mira"
@@ -676,7 +677,7 @@ end
 
 local function refreshSwitchVisibility()
     if SwitchGui then
-        SwitchGui.Enabled = Aim.Enabled and Aim.Mode ~= "1v1"
+        SwitchGui.Enabled = Aim.Enabled and Aim.SwitchEnabled and Aim.Mode ~= "1v1"
     end
 end
 
@@ -1600,22 +1601,6 @@ WindUI:AddTheme({
     Icon = Color3.fromHex("#a1a1aa"),
 })
 
--- Demon Slayer (opcional, escolha em Settings > Aparência)
-WindUI:AddTheme({
-    Name = "Demon Slayer",
-
-    Accent = Color3.fromHex("#10291d"),
-    Dialog = Color3.fromHex("#0a1610"),
-    Outline = Color3.fromHex("#e63946"),
-    Text = Color3.fromHex("#f1f5ee"),
-    Placeholder = Color3.fromHex("#7c8f84"),
-    Background = Color3.fromHex("#070d0a"),
-    Button = Color3.fromHex("#1f5c3a"),
-    Icon = Color3.fromHex("#ff5a68"),
-    Toggle = Color3.fromHex("#e63946"),
-    Slider = Color3.fromHex("#e63946"),
-})
-
 ----------------------------------------------------------------
 -- Janela
 ----------------------------------------------------------------
@@ -1754,6 +1739,18 @@ AimMainSection:Toggle({
     Value = false,
     Callback = function(state)
         setAimEnabled(state)
+    end,
+})
+
+AimMainSection:Toggle({
+    Title = "Troca Alvo",
+    Desc = "Mostra o botão TROCA ALVO na tela (precisa do Aimbot ligado).",
+    Icon = "repeat",
+    Flag = "aim_switch_enabled",
+    Value = true,
+    Callback = function(state)
+        Aim.SwitchEnabled = state
+        refreshSwitchVisibility()
     end,
 })
 
@@ -1962,7 +1959,7 @@ local AppearanceSection = SettingsTab:Section({ Title = "Aparência", Opened = t
 
 AppearanceSection:Dropdown({
     Title = "Tema",
-    Values = { "Darker", "Dark", "Demon Slayer" },
+    Values = { "Darker" },
     Value = "Darker",
     Flag = "theme",
     Callback = function(selected)
