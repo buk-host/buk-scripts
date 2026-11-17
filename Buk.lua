@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Aimbot, Travar Botões) | Aimbot (1v1 até 4v4) | Player (CFrame Speed, Shift Lock) | Esp | Mod (Câmera) | Settings
+    Abas: Main (Trocar de Servidor) | Aimbot (Aimbot, Travar Botões) | Player (CFrame Speed, Shift Lock) | Esp | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -21,6 +21,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -1235,6 +1237,178 @@ RunService:BindToRenderStep("BukShift", Enum.RenderPriority.Camera.Value + 2, fu
     end
 end)
 
+----- Trocar de Servidor -----
+local Hop = {
+    Mode = "Mais cheio", -- "Mais cheio" | "Mais vazio" | "Aleatório"
+    Busy = false,
+    MaxPages = 3, -- quantas páginas da lista (100 servidores cada) ele busca, no máximo
+    MaxTries = 5, -- quantos servidores tenta antes de desistir e só reentrar no jogo
+}
+
+-- GET que funciona em vários executores: game:HttpGet, ou request/http_request
+local function httpGet(url)
+    local ok, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok and type(body) == "string" and #body > 0 then
+        return body
+    end
+
+    local req = (syn and syn.request) or http_request or request
+    if req then
+        local ok2, res = pcall(req, { Url = url, Method = "GET" })
+        if ok2 and type(res) == "table" and type(res.Body) == "string" and (res.StatusCode or 200) == 200 then
+            return res.Body
+        end
+    end
+    return nil
+end
+
+-- Servidores públicos com vaga, já sem o servidor onde você está, na ordem do modo escolhido.
+-- Devolve uma lista vazia se o executor não deixar buscar (ou a Roblox recusar).
+local function fetchServers()
+    local random = Hop.Mode == "Aleatório"
+    local order = (Hop.Mode == "Mais vazio") and "Asc" or "Desc" -- Desc = mais cheio primeiro
+    local want = random and 50 or Hop.MaxTries
+    local found = {}
+    local cursor = nil
+
+    for _ = 1, Hop.MaxPages do
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=%s&excludeFullGames=true&limit=100",
+            tostring(game.PlaceId),
+            order
+        )
+        if cursor then
+            url ..= "&cursor=" .. HttpService:UrlEncode(cursor)
+        end
+
+        local body = httpGet(url)
+        if not body then
+            break
+        end
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(body)
+        end)
+        if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
+            break
+        end
+
+        for _, server in ipairs(data.data) do
+            if
+                server.id ~= game.JobId
+                and type(server.playing) == "number"
+                and type(server.maxPlayers) == "number"
+                and server.playing < server.maxPlayers
+            then
+                table.insert(found, server)
+            end
+        end
+
+        cursor = data.nextPageCursor
+        if type(cursor) ~= "string" or #found >= want then
+            break
+        end
+    end
+
+    if random then
+        for i = #found, 2, -1 do
+            local j = math.random(i)
+            found[i], found[j] = found[j], found[i]
+        end
+    end
+    return found
+end
+
+-- Sem lista (ou nenhum servidor aceitou): só reentra no jogo
+local function reenterGame(reason)
+    WindUI:Notify({
+        Title = "Trocar de Servidor",
+        Content = reason .. " Reentrando no jogo...",
+        Duration = 4,
+    })
+    task.wait(1)
+    pcall(function()
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    end)
+end
+
+local function hopServer()
+    if Hop.Busy then
+        notifyOnce("hop", "Trocar de Servidor", "Já estou trocando, aguarde.")
+        return
+    end
+    Hop.Busy = true
+
+    task.spawn(function()
+        WindUI:Notify({
+            Title = "Trocar de Servidor",
+            Content = "Procurando servidor (" .. string.lower(Hop.Mode) .. ")...",
+            Duration = 3,
+        })
+
+        local ok, servers = pcall(fetchServers)
+        if not ok or #servers == 0 then
+            reenterGame("Não consegui a lista de servidores.")
+            task.wait(10) -- se o teleporte falhar, libera o botão de novo
+            Hop.Busy = false
+            return
+        end
+
+        -- Se o servidor encher antes de você entrar, o teleporte falha: tenta o próximo da lista
+        local failed = false
+        local conn = TeleportService.TeleportInitFailed:Connect(function()
+            failed = true
+        end)
+
+        local success = false
+        for i = 1, math.min(#servers, Hop.MaxTries) do
+            local server = servers[i]
+            failed = false
+            local started = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+            end)
+            if started then
+                local t0 = os.clock()
+                while not failed and os.clock() - t0 < 8 do
+                    task.wait(0.25)
+                end
+                if not failed then
+                    success = true -- sem erro em 8s: o teleporte está acontecendo
+                    break
+                end
+            end
+        end
+        conn:Disconnect()
+
+        if not success then
+            reenterGame("Os servidores encheram ou o teleporte foi bloqueado.")
+            task.wait(10)
+        end
+        Hop.Busy = false
+    end)
+end
+
+-- Pede confirmação antes (um toque sem querer te tiraria da partida)
+local function confirmHop()
+    local shown = pcall(function()
+        WindUI:Popup({
+            Title = "Trocar de Servidor",
+            Content = "Você vai sair desta partida e entrar em outro servidor ("
+                .. string.lower(Hop.Mode)
+                .. "). Continuar?",
+            Icon = "server",
+            Buttons = {
+                { Title = "Cancelar", Variant = "Secondary", Callback = function() end },
+                { Title = "Trocar", Variant = "Primary", Callback = hopServer },
+            },
+        })
+    end)
+    if not shown then
+        hopServer() -- se o popup não abrir nesta versão do WindUI, troca direto
+    end
+end
+
 ----------------------------------------------------------------
 -- Mod: Câmera (FOV travado + câmera longe travada)
 ----------------------------------------------------------------
@@ -1534,31 +1708,30 @@ do
 end
 
 ----------------------------------------------------------------
--- 1. Main (Aimbot + Travar Botões)
+-- 1. Main (Trocar de Servidor)
 ----------------------------------------------------------------
 local MainTab = Window:Tab({
     Title = "Main",
     Icon = "house",
 })
 
-MainTab:Toggle({
-    Title = "Aimbot",
-    Desc = "Mostra o botão AIM na tela. Aperte nele no começo da luta.",
-    Icon = "crosshair",
-    Flag = "aim_enabled",
-    Value = false,
-    Callback = function(state)
-        setAimEnabled(state)
+local HopSection = MainTab:Section({ Title = "Servidor", Opened = true })
+
+HopSection:Dropdown({
+    Title = "Servidor de destino",
+    Values = { "Mais cheio", "Mais vazio", "Aleatório" },
+    Value = "Mais cheio",
+    Flag = "hop_mode",
+    Callback = function(selected)
+        Hop.Mode = selected
     end,
 })
 
-MainTab:Toggle({
-    Title = "Travar Botões",
-    Desc = "Impede de arrastar os botões da tela sem querer.",
-    Flag = "aim_button_locked",
-    Value = false,
-    Callback = function(state)
-        Aim.ButtonLocked = state
+HopSection:Button({
+    Title = "Trocar de Servidor",
+    Icon = "server",
+    Callback = function()
+        confirmHop()
     end,
 })
 
@@ -1570,154 +1743,27 @@ local AimTab = Window:Tab({
     Icon = "crosshair",
 })
 
------ Partida -----
-local AimMainSection = AimTab:Section({ Title = "Partida", Opened = true })
+----- Aimbot -----
+local AimMainSection = AimTab:Section({ Title = "Aimbot", Opened = true })
 
-AimMainSection:Dropdown({
-    Title = "Modo da partida",
-    Desc = "Limite de players por perto pra ligar (1v1=1, 2v2=3, 3v3=5, 4v4=7). 4v4 serve pra todos os modos. A partir do 2v2 aparece o botão TROCA ALVO.",
-    Values = { "1v1", "2v2", "3v3", "4v4" },
-    Value = "4v4",
-    Flag = "aim_mode",
-    Callback = function(selected)
-        Aim.Mode = selected
-        refreshSwitchVisibility()
-    end,
-})
-
------ Mira -----
-local AimCfgSection = AimTab:Section({ Title = "Mira", Opened = true })
-
-AimCfgSection:Dropdown({
-    Title = "Mirar em",
-    Values = { "Corpo", "Cabeça" },
-    Value = "Corpo",
-    Flag = "aim_part",
-    Callback = function(selected)
-        Aim.PartName = (selected == "Cabeça") and "Head" or "HumanoidRootPart"
-    end,
-})
-
-AimCfgSection:Dropdown({
-    Title = "Primeiro alvo",
-    Desc = "Qual inimigo o aimbot pega quando você aperta AIM.",
-    Values = { "Perto de mim", "Perto da mira" },
-    Value = "Perto de mim",
-    Flag = "aim_pick",
-    Callback = function(selected)
-        Aim.Pick = selected
-    end,
-})
-
-AimCfgSection:Dropdown({
-    Title = "Ao matar o alvo",
-    Desc = "Quem o aimbot pega quando o alvo morre. Sempre um inimigo vivo, nunca o seu time.",
-    Values = { "Aleatório", "Perto de mim", "Perto da mira" },
-    Value = "Aleatório",
-    Flag = "aim_on_kill",
-    Callback = function(selected)
-        Aim.OnKill = selected
-    end,
-})
-
-AimCfgSection:Slider({
-    Title = "Suavidade",
-    Desc = "0 = trava total. Quanto maior, mais devagar a câmera gira pro alvo.",
-    Flag = "aim_smooth",
-    Step = 1,
-    Value = { Min = 0, Max = 90, Default = 0 },
-    Callback = function(value)
-        Aim.Smooth = math.clamp(value, 0, 90)
-    end,
-})
-
-AimCfgSection:Slider({
-    Title = "Alcance",
-    Desc = "Só procura alvo dentro dessa distância. Diminua se tiver outra arena perto.",
-    Flag = "aim_range",
-    Step = 10,
-    Value = { Min = 50, Max = 500, Default = 200 },
-    Callback = function(value)
-        Aim.MaxDistance = value
-    end,
-})
-
-AimCfgSection:Toggle({
-    Title = "Checar parede",
-    Desc = "Ignora inimigo que está atrás de parede na hora de escolher o alvo.",
-    Flag = "aim_wallcheck",
+AimMainSection:Toggle({
+    Title = "Aimbot",
+    Desc = "Mostra o botão AIM na tela. Aperte nele no começo da luta.",
+    Icon = "crosshair",
+    Flag = "aim_enabled",
     Value = false,
     Callback = function(state)
-        Aim.WallCheck = state
+        setAimEnabled(state)
     end,
 })
 
-AimCfgSection:Toggle({
-    Title = "Personagem olha pro alvo",
-    Flag = "aim_face_target",
-    Value = true,
+AimMainSection:Toggle({
+    Title = "Travar Botões",
+    Desc = "Impede de arrastar os botões da tela sem querer.",
+    Flag = "aim_button_locked",
+    Value = false,
     Callback = function(state)
-        Aim.FaceTarget = state
-    end,
-})
-
------ Aliados (2v2 a 4v4) -----
-local AimAllySection = AimTab:Section({ Title = "Aliados (2v2 a 4v4)", Opened = true })
-
-AimAllySection:Button({
-    Title = "Marcar alvo atual como aliado",
-    Desc = "Use se o aimbot travar no seu parceiro: marca ele e já pula pro próximo inimigo.",
-    Icon = "user-check",
-    Callback = function()
-        markCurrentAsAlly()
-    end,
-})
-
-AimAllySection:Button({
-    Title = "Marcar Aliado (mais perto)",
-    Desc = "Marca quem está mais perto de você e ainda não é aliado. Aperte de novo pra marcar o próximo.",
-    Icon = "users",
-    Callback = function()
-        markNearestAsAlly()
-    end,
-})
-
-AimAllySection:Button({
-    Title = "Limpar Aliados",
-    Icon = "eraser",
-    Callback = function()
-        clearAllies()
-    end,
-})
-
-AimAllySection:Button({
-    Title = "Copiar info dos players",
-    Desc = "Diagnóstico: se o aimbot errar o time, aperte aqui e cole o texto no chat pra eu ajustar.",
-    Icon = "clipboard",
-    Callback = function()
-        dumpPlayers()
-    end,
-})
-
------ Visual da mira -----
-local AimDotSection = AimTab:Section({ Title = "Visual da mira", Opened = false })
-
-AimDotSection:Dropdown({
-    Title = "Tamanho da mira",
-    Values = { "Fino", "Médio", "Grosso", "Grande" },
-    Value = "Médio",
-    Flag = "aim_dot_size",
-    Callback = function(selected)
-        setAimDotSize(AIM_DOT_SIZES[selected] or AIM_DOT_SIZES["Médio"])
-    end,
-})
-
-AimDotSection:Colorpicker({
-    Title = "Cor do ponto",
-    Flag = "aim_dot_color",
-    Default = Color3.fromRGB(255, 60, 60),
-    Callback = function(color)
-        setAimDotColor(color)
+        Aim.ButtonLocked = state
     end,
 })
 
