@@ -38,7 +38,7 @@ local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footag
 ----------------------------------------------------------------
 local State = {
     CFrameSpeed = false,
-    SpeedValue = 30,
+    SpeedValue = 16,
 
     ESP = {
         Name = false,
@@ -1786,9 +1786,9 @@ PlayerTab:Slider({
     Title = "Velocidade",
     Flag = "cframe_speed_value",
     Step = 1,
-    Value = { Min = 1, Max = 1000, Default = 30 },
+    Value = { Min = 16, Max = 250, Default = 16 },
     Callback = function(value)
-        State.SpeedValue = math.clamp(value, 1, 1000)
+        State.SpeedValue = math.clamp(value, 16, 250)
     end,
 })
 
@@ -1881,7 +1881,7 @@ EspCfgSection:Slider({
     Step = 50,
     Value = { Min = 100, Max = 5000, Default = 2000 },
     Callback = function(value)
-        State.ESP.MaxDistance = value
+        State.ESP.MaxDistance = math.clamp(value, 100, 5000)
     end,
 })
 
@@ -1921,7 +1921,7 @@ CamSection:Slider({
     Step = 1,
     Value = { Min = 70, Max = 120, Default = 100 },
     Callback = function(value)
-        FOV.Value = value
+        FOV.Value = math.clamp(value, 70, 120)
         applyFOV()
     end,
 })
@@ -1941,7 +1941,7 @@ CamSection:Slider({
     Step = 1,
     Value = { Min = 10, Max = 300, Default = 50 },
     Callback = function(value)
-        CamLock.Distance = value
+        CamLock.Distance = math.clamp(value, 10, 300)
         applyCamLock()
     end,
 })
@@ -1961,7 +1961,6 @@ AppearanceSection:Dropdown({
     Title = "Tema",
     Values = { "Darker" },
     Value = "Darker",
-    Flag = "theme",
     Callback = function(selected)
         WindUI:SetTheme(selected)
     end,
@@ -2011,6 +2010,11 @@ if Config then
         Config:Load() -- carrega as configurações salvas anteriormente
     end)
 end
+
+-- Só existe o tema Darker: garante ele mesmo que a config antiga tenha outro salvo
+pcall(function()
+    WindUI:SetTheme("Darker")
+end)
 
 if not DrawingSupported then
     WindUI:Notify({
