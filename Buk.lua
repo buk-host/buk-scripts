@@ -3,7 +3,7 @@
     Created by: Line
     UI Library: WindUI
 
-    Abas: Main (Trocar de Servidor) | Aimbot (1v1 até 4v4) | Player (CFrame Speed, Shift Lock) | Esp | Mod (Câmera) | Settings
+    Abas: Main (Aimbot, Travar Botões) | Aimbot (1v1 até 4v4) | Player (CFrame Speed, Shift Lock) | Esp | Mod (Câmera) | Settings
     Tecla para abrir/fechar o menu: RightShift
 ]]
 
@@ -21,8 +21,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
 local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -1237,178 +1235,6 @@ RunService:BindToRenderStep("BukShift", Enum.RenderPriority.Camera.Value + 2, fu
     end
 end)
 
------ Trocar de Servidor -----
-local Hop = {
-    Mode = "Mais cheio", -- "Mais cheio" | "Mais vazio" | "Aleatório"
-    Busy = false,
-    MaxPages = 3, -- quantas páginas da lista (100 servidores cada) ele busca, no máximo
-    MaxTries = 5, -- quantos servidores tenta antes de desistir e só reentrar no jogo
-}
-
--- GET que funciona em vários executores: game:HttpGet, ou request/http_request
-local function httpGet(url)
-    local ok, body = pcall(function()
-        return game:HttpGet(url)
-    end)
-    if ok and type(body) == "string" and #body > 0 then
-        return body
-    end
-
-    local req = (syn and syn.request) or http_request or request
-    if req then
-        local ok2, res = pcall(req, { Url = url, Method = "GET" })
-        if ok2 and type(res) == "table" and type(res.Body) == "string" and (res.StatusCode or 200) == 200 then
-            return res.Body
-        end
-    end
-    return nil
-end
-
--- Servidores públicos com vaga, já sem o servidor onde você está, na ordem do modo escolhido.
--- Devolve uma lista vazia se o executor não deixar buscar (ou a Roblox recusar).
-local function fetchServers()
-    local random = Hop.Mode == "Aleatório"
-    local order = (Hop.Mode == "Mais vazio") and "Asc" or "Desc" -- Desc = mais cheio primeiro
-    local want = random and 50 or Hop.MaxTries
-    local found = {}
-    local cursor = nil
-
-    for _ = 1, Hop.MaxPages do
-        local url = string.format(
-            "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=%s&excludeFullGames=true&limit=100",
-            tostring(game.PlaceId),
-            order
-        )
-        if cursor then
-            url ..= "&cursor=" .. HttpService:UrlEncode(cursor)
-        end
-
-        local body = httpGet(url)
-        if not body then
-            break
-        end
-        local ok, data = pcall(function()
-            return HttpService:JSONDecode(body)
-        end)
-        if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
-            break
-        end
-
-        for _, server in ipairs(data.data) do
-            if
-                server.id ~= game.JobId
-                and type(server.playing) == "number"
-                and type(server.maxPlayers) == "number"
-                and server.playing < server.maxPlayers
-            then
-                table.insert(found, server)
-            end
-        end
-
-        cursor = data.nextPageCursor
-        if type(cursor) ~= "string" or #found >= want then
-            break
-        end
-    end
-
-    if random then
-        for i = #found, 2, -1 do
-            local j = math.random(i)
-            found[i], found[j] = found[j], found[i]
-        end
-    end
-    return found
-end
-
--- Sem lista (ou nenhum servidor aceitou): só reentra no jogo
-local function reenterGame(reason)
-    WindUI:Notify({
-        Title = "Trocar de Servidor",
-        Content = reason .. " Reentrando no jogo...",
-        Duration = 4,
-    })
-    task.wait(1)
-    pcall(function()
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-    end)
-end
-
-local function hopServer()
-    if Hop.Busy then
-        notifyOnce("hop", "Trocar de Servidor", "Já estou trocando, aguarde.")
-        return
-    end
-    Hop.Busy = true
-
-    task.spawn(function()
-        WindUI:Notify({
-            Title = "Trocar de Servidor",
-            Content = "Procurando servidor (" .. string.lower(Hop.Mode) .. ")...",
-            Duration = 3,
-        })
-
-        local ok, servers = pcall(fetchServers)
-        if not ok or #servers == 0 then
-            reenterGame("Não consegui a lista de servidores.")
-            task.wait(10) -- se o teleporte falhar, libera o botão de novo
-            Hop.Busy = false
-            return
-        end
-
-        -- Se o servidor encher antes de você entrar, o teleporte falha: tenta o próximo da lista
-        local failed = false
-        local conn = TeleportService.TeleportInitFailed:Connect(function()
-            failed = true
-        end)
-
-        local success = false
-        for i = 1, math.min(#servers, Hop.MaxTries) do
-            local server = servers[i]
-            failed = false
-            local started = pcall(function()
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
-            end)
-            if started then
-                local t0 = os.clock()
-                while not failed and os.clock() - t0 < 8 do
-                    task.wait(0.25)
-                end
-                if not failed then
-                    success = true -- sem erro em 8s: o teleporte está acontecendo
-                    break
-                end
-            end
-        end
-        conn:Disconnect()
-
-        if not success then
-            reenterGame("Os servidores encheram ou o teleporte foi bloqueado.")
-            task.wait(10)
-        end
-        Hop.Busy = false
-    end)
-end
-
--- Pede confirmação antes (um toque sem querer te tiraria da partida)
-local function confirmHop()
-    local shown = pcall(function()
-        WindUI:Popup({
-            Title = "Trocar de Servidor",
-            Content = "Você vai sair desta partida e entrar em outro servidor ("
-                .. string.lower(Hop.Mode)
-                .. "). Continuar?",
-            Icon = "server",
-            Buttons = {
-                { Title = "Cancelar", Variant = "Secondary", Callback = function() end },
-                { Title = "Trocar", Variant = "Primary", Callback = hopServer },
-            },
-        })
-    end)
-    if not shown then
-        hopServer() -- se o popup não abrir nesta versão do WindUI, troca direto
-    end
-end
-
 ----------------------------------------------------------------
 -- Mod: Câmera (FOV travado + câmera longe travada)
 ----------------------------------------------------------------
@@ -1708,30 +1534,31 @@ do
 end
 
 ----------------------------------------------------------------
--- 1. Main (Trocar de Servidor)
+-- 1. Main (Aimbot + Travar Botões)
 ----------------------------------------------------------------
 local MainTab = Window:Tab({
     Title = "Main",
     Icon = "house",
 })
 
-local HopSection = MainTab:Section({ Title = "Servidor", Opened = true })
-
-HopSection:Dropdown({
-    Title = "Servidor de destino",
-    Values = { "Mais cheio", "Mais vazio", "Aleatório" },
-    Value = "Mais cheio",
-    Flag = "hop_mode",
-    Callback = function(selected)
-        Hop.Mode = selected
+MainTab:Toggle({
+    Title = "Aimbot",
+    Desc = "Mostra o botão AIM na tela. Aperte nele no começo da luta.",
+    Icon = "crosshair",
+    Flag = "aim_enabled",
+    Value = false,
+    Callback = function(state)
+        setAimEnabled(state)
     end,
 })
 
-HopSection:Button({
-    Title = "Trocar de Servidor",
-    Icon = "server",
-    Callback = function()
-        confirmHop()
+MainTab:Toggle({
+    Title = "Travar Botões",
+    Desc = "Impede de arrastar os botões da tela sem querer.",
+    Flag = "aim_button_locked",
+    Value = false,
+    Callback = function(state)
+        Aim.ButtonLocked = state
     end,
 })
 
@@ -1743,19 +1570,8 @@ local AimTab = Window:Tab({
     Icon = "crosshair",
 })
 
------ Aimbot -----
-local AimMainSection = AimTab:Section({ Title = "Aimbot", Opened = true })
-
-AimMainSection:Toggle({
-    Title = "Aimbot",
-    Desc = "Mostra o botão AIM na tela. Aperte nele no começo da luta.",
-    Icon = "crosshair",
-    Flag = "aim_enabled",
-    Value = false,
-    Callback = function(state)
-        setAimEnabled(state)
-    end,
-})
+----- Partida -----
+local AimMainSection = AimTab:Section({ Title = "Partida", Opened = true })
 
 AimMainSection:Dropdown({
     Title = "Modo da partida",
@@ -1766,16 +1582,6 @@ AimMainSection:Dropdown({
     Callback = function(selected)
         Aim.Mode = selected
         refreshSwitchVisibility()
-    end,
-})
-
-AimMainSection:Toggle({
-    Title = "Travar Botões",
-    Desc = "Impede de arrastar os botões da tela sem querer.",
-    Flag = "aim_button_locked",
-    Value = false,
-    Callback = function(state)
-        Aim.ButtonLocked = state
     end,
 })
 
