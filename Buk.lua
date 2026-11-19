@@ -1,8 +1,12 @@
 --[[
-    Buk  |  by Nobody  |  v2.0 (final)
+    Buk  |  by Nobody  |  v2.1
     UI  : WindUI
-    Abas: Main | Player | Esp | Settings
+    Abas: Main | Player | Esp | Racket | Settings
     Menu: RightShift (pode ser trocado em Settings > Menu Key)
+
+    Novidades da v2.1:
+      - Aba Racket (Racket Rivals): Auto Hit teleporta para onde a bola
+        vai cair e rebate; detecção por nome + botão Scan Objects
 
     Novidades da v2.0 (a interface continua a mesma):
       - CFrame Speed: Wall Check com 3 raios (pega quinas) e deslizamento
@@ -14,7 +18,7 @@
       - Carregamento da WindUI com nova tentativa e aviso na tela
 ]]
 
-local VERSION = "2.0"
+local VERSION = "2.1"
 
 --------------------------------------------------------------------
 -- Evita rodar duas vezes: descarrega a versão anterior primeiro
@@ -776,12 +780,512 @@ local function setESP(key, state)
 end
 
 --------------------------------------------------------------------
+-- Racket Rivals: Auto Hit (teleporta onde a bola vai cair e rebate)
+--------------------------------------------------------------------
+-- Como funciona:
+--   1) acha a bola (por nome) e acompanha a velocidade dela
+--   2) descobre onde ela vai cair: pela marcação do jogo (se você
+--      colocar o nome em "Marker Name") ou calculando a queda
+--   3) quando a bola está descendo e baixa o bastante, teleporta
+--      para debaixo dela e dá a batida quando ela chega perto
+local Racket = {
+    AutoHit    = false,
+    AutoSwing  = true,
+    SwingMode  = "Auto", -- Auto | Tool | Click | Key
+    SwingKey   = "E",
+    TpHeight   = 30,     -- teleporta quando a bola está abaixo dessa altura
+    SwingRange = 12,     -- bate quando a bola está a essa distância
+    MaxDist    = 60,     -- ignora bola que cai mais longe que isso
+    BallList   = { "shuttle", "birdie", "bird", "ball" },
+    MarkerList = {},     -- vazio = não usa marcação, só calcula a queda
+    Candidates = {},     -- bolas encontradas
+    Markers    = {},     -- marcações encontradas
+    Tracked    = nil,
+    LastPos    = Vector3.new(0, 0, 0),
+    Vel        = Vector3.new(0, 0, 0),
+    LastSwing  = -math.huge,
+    LastScan   = -math.huge,
+    Scanning   = false,
+}
+
+local DEFAULT_BALL_WORDS = { "shuttle", "birdie", "bird", "ball" }
+local REPORT_WORDS = {
+    "shuttle", "birdie", "bird", "ball", "marker", "indicator",
+    "landing", "target", "shadow", "predict", "spot",
+}
+
+local VIM = nil
+pcall(function()
+    VIM = game:GetService("VirtualInputManager")
+end)
+
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+local groundBall   = nil
+local groundStamp  = 0
+
+-- "Shuttle, Ball" -> { "shuttle", "ball" }
+local function parseNames(text)
+    local list = {}
+    for piece in string.gmatch(tostring(text or ""), "[^,]+") do
+        local clean = string.lower(string.match(piece, "^%s*(.-)%s*$"))
+        if clean ~= "" then
+            list[#list + 1] = clean
+        end
+    end
+    return list
+end
+
+local function nameMatches(name, words)
+    if #words == 0 then
+        return false
+    end
+    local lower = string.lower(name)
+    for i = 1, #words do
+        if string.find(lower, words[i], 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function inCharacter(inst)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local char = plr.Character
+        if char and inst:IsDescendantOf(char) then
+            return true
+        end
+    end
+    return false
+end
+
+local function toPart(inst)
+    if inst:IsA("BasePart") then
+        return inst
+    end
+    if inst:IsA("Model") then
+        return inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
+    end
+    return nil
+end
+
+local function considerBall(inst)
+    if not (inst:IsA("BasePart") or inst:IsA("Model")) then
+        return
+    end
+    if not nameMatches(inst.Name, Racket.BallList) then
+        return
+    end
+    if nameMatches(inst.Name, Racket.MarkerList) then
+        return -- é a marcação, não a bola
+    end
+    local part = toPart(inst)
+    if not part then
+        return
+    end
+    local s = part.Size
+    if max(s.X, s.Y, s.Z) > 6 then
+        return -- grande demais para ser a bola
+    end
+    if inCharacter(inst) then
+        return
+    end
+    Racket.Candidates[part] = true
+end
+
+local function considerMarker(inst)
+    if #Racket.MarkerList == 0 then
+        return
+    end
+    if not (inst:IsA("BasePart") or inst:IsA("Model")) then
+        return
+    end
+    if not nameMatches(inst.Name, Racket.MarkerList) then
+        return
+    end
+    local part = toPart(inst)
+    if not part then
+        return
+    end
+    local s = part.Size
+    if max(s.X, s.Y, s.Z) > 30 then
+        return
+    end
+    if inCharacter(inst) then
+        return
+    end
+    Racket.Markers[part] = true
+end
+
+-- Procura a bola/marcação no Workspace sem travar o jogo
+local function scanWorkspaceAsync()
+    if Racket.Scanning then
+        return
+    end
+    Racket.Scanning = true
+    Racket.LastScan = os.clock()
+
+    task.spawn(function()
+        local ok, err = pcall(function()
+            local list = Workspace:GetDescendants()
+            for i = 1, #list do
+                considerBall(list[i])
+                considerMarker(list[i])
+                if i % 4000 == 0 then
+                    task.wait()
+                end
+            end
+        end)
+        if not ok then
+            warnOnce("Auto Hit scan", err)
+        end
+        Racket.Scanning = false
+        Racket.LastScan = os.clock()
+    end)
+end
+
+local function resetDetection()
+    Racket.Candidates = {}
+    Racket.Markers    = {}
+    Racket.Tracked    = nil
+    Racket.LastScan   = -math.huge
+end
+
+local function pickBall(root)
+    local best, bestDist = nil, math.huge
+    for part in pairs(Racket.Candidates) do
+        if part.Parent == nil or not part:IsDescendantOf(Workspace) then
+            Racket.Candidates[part] = nil
+        else
+            local d = (part.Position - root.Position).Magnitude
+            if d < bestDist then
+                best, bestDist = part, d
+            end
+        end
+    end
+    return best
+end
+
+-- Marcação mais próxima da bola (só quando o nome foi informado)
+local function pickMarker(bpos)
+    local best, bestDist = nil, math.huge
+    for part in pairs(Racket.Markers) do
+        if part.Parent == nil or not part:IsDescendantOf(Workspace) then
+            Racket.Markers[part] = nil
+        else
+            local p = part.Position
+            local dx, dz = p.X - bpos.X, p.Z - bpos.Z
+            local d = dx * dx + dz * dz
+            if d < bestDist then
+                best, bestDist = part, d
+            end
+        end
+    end
+    return best
+end
+
+-- Velocidade da bola: usa a do Roblox e, se vier zerada
+-- (bola movida por script), usa a calculada pelo deslocamento
+local function trackBall(part, dt)
+    if Racket.Tracked ~= part then
+        Racket.Tracked = part
+        Racket.LastPos = part.Position
+        Racket.Vel     = Vector3.new(0, 0, 0)
+        return
+    end
+    local pos = part.Position
+    if dt > 0 then
+        local raw = (pos - Racket.LastPos) / dt
+        Racket.Vel = Racket.Vel:Lerp(raw, 0.5)
+    end
+    Racket.LastPos = pos
+end
+
+local function ballVelocity(part)
+    local v = part.AssemblyLinearVelocity
+    if v.Magnitude < 0.5 then
+        v = Racket.Vel
+    end
+    return v
+end
+
+-- Calcula onde a bola vai tocar o chão (queda com gravidade)
+local function predictLanding(ball, pos, vel)
+    local now = os.clock()
+    if groundBall ~= ball or now - groundStamp > 0.5 then
+        groundBall  = ball
+        groundStamp = now
+        local list = { ball }
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr.Character then
+                list[#list + 1] = plr.Character
+            end
+        end
+        groundParams.FilterDescendantsInstances = list
+    end
+
+    local groundY = pos.Y - 10
+    local hit = Workspace:Raycast(pos, Vector3.new(0, -1000, 0), groundParams)
+    if hit then
+        groundY = hit.Position.Y
+    end
+
+    local g = Workspace.Gravity
+    local h = max(pos.Y - groundY, 0)
+    local t = 0
+    if g > 1 then
+        t = (vel.Y + math.sqrt(vel.Y * vel.Y + 2 * g * h)) / g
+    elseif vel.Y < -0.5 then
+        t = h / -vel.Y
+    end
+    t = clamp(t, 0, 5)
+
+    return Vector3.new(pos.X + vel.X * t, groundY, pos.Z + vel.Z * t)
+end
+
+--------------------------------------------------------------------
+-- Batida
+--------------------------------------------------------------------
+local function activateTool()
+    local char = Rig.Char
+    if not char then
+        return false
+    end
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then
+        return false
+    end
+    local ok = pcall(function()
+        tool:Activate()
+    end)
+    return ok
+end
+
+local function clickScreen()
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+        return
+    end
+    if not VIM then
+        return
+    end
+    local cam  = Workspace.CurrentCamera
+    local size = cam and cam.ViewportSize or Vector2.new(800, 600)
+    local x, y = size.X / 2, size.Y / 2
+    pcall(function()
+        VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end)
+end
+
+local function parseKey(text)
+    local clean = string.gsub(tostring(text or ""), "%s", "")
+    if clean == "" then
+        return nil
+    end
+    local tries = {
+        clean,
+        string.upper(clean),
+        string.upper(string.sub(clean, 1, 1)) .. string.lower(string.sub(clean, 2)),
+    }
+    for _, name in ipairs(tries) do
+        local ok, key = pcall(function()
+            return Enum.KeyCode[name]
+        end)
+        if ok and key then
+            return key
+        end
+    end
+    return nil
+end
+
+local function pressKey()
+    if not VIM then
+        return
+    end
+    local key = parseKey(Racket.SwingKey)
+    if not key then
+        return
+    end
+    pcall(function()
+        VIM:SendKeyEvent(true, key, false, game)
+    end)
+    task.delay(0.04, function()
+        pcall(function()
+            VIM:SendKeyEvent(false, key, false, game)
+        end)
+    end)
+end
+
+local function doSwing()
+    local mode = Racket.SwingMode
+    if mode == "Tool" then
+        activateTool()
+    elseif mode == "Click" then
+        clickScreen()
+    elseif mode == "Key" then
+        pressKey()
+    else -- Auto: usa a ferramenta equipada; se não houver, clica
+        if not activateTool() then
+            clickScreen()
+        end
+    end
+end
+
+--------------------------------------------------------------------
+-- Loop principal
+--------------------------------------------------------------------
+local function racketStep(dt)
+    if not Racket.AutoHit then
+        return
+    end
+
+    local hum, root = getRig()
+    if not hum or not root or hum.Health <= 0 or hum.Sit or root.Anchored then
+        return
+    end
+
+    local now = os.clock()
+
+    local ball = pickBall(root)
+    if not ball then
+        if not Racket.Scanning and now - Racket.LastScan > 4 then
+            scanWorkspaceAsync()
+        end
+        return
+    end
+
+    trackBall(ball, dt)
+
+    -- espera um pouco depois de cada batida
+    if now - Racket.LastSwing < 0.7 then
+        return
+    end
+
+    local bpos = ball.Position
+    local vel  = ballVelocity(ball)
+
+    -- só age quando a bola está caindo
+    if vel.Y > -0.5 then
+        return
+    end
+
+    local marker  = pickMarker(bpos)
+    local landing = marker and marker.Position or predictLanding(ball, bpos, vel)
+
+    -- ainda está alta demais: espera descer mais
+    if bpos.Y - landing.Y > Racket.TpHeight then
+        return
+    end
+
+    -- cai longe demais (provavelmente o lado do adversário)
+    local mine = root.Position
+    local dx, dz = landing.X - mine.X, landing.Z - mine.Z
+    if math.sqrt(dx * dx + dz * dz) > Racket.MaxDist then
+        return
+    end
+
+    -- teleporta para debaixo da bola (mantém sua altura e direção)
+    if dx * dx + dz * dz > 2.25 then
+        root.CFrame = CFrame.new(landing.X, mine.Y, landing.Z) * (root.CFrame - root.CFrame.Position)
+    end
+
+    -- bate quando a bola chega perto
+    if Racket.AutoSwing and (ball.Position - root.Position).Magnitude <= Racket.SwingRange then
+        Racket.LastSwing = now
+        doSwing()
+    end
+end
+
+connect(RunService.Heartbeat, function(dt)
+    local ok, err = pcall(racketStep, dt)
+    if not ok then
+        warnOnce("Auto Hit", err)
+    end
+end)
+
+-- Bola/marcação que aparecem depois (nova rodada, novo saque)
+connect(Workspace.DescendantAdded, function(inst)
+    if not Racket.AutoHit then
+        return
+    end
+    local isBall   = nameMatches(inst.Name, Racket.BallList)
+    local isMarker = nameMatches(inst.Name, Racket.MarkerList)
+    if isBall or isMarker then
+        task.defer(function()
+            considerBall(inst)
+            considerMarker(inst)
+        end)
+    end
+end)
+
+--------------------------------------------------------------------
+-- Scan: lista objetos com cara de bola/marcação (ajuda a achar o nome)
+--------------------------------------------------------------------
+local function scanReport()
+    notify("Procurando objetos da bola...", "search", 2)
+
+    task.spawn(function()
+        local lines, names, seen = {}, {}, {}
+        local list = Workspace:GetDescendants()
+
+        for i = 1, #list do
+            local inst = list[i]
+            if (inst:IsA("BasePart") or inst:IsA("Model"))
+                and nameMatches(inst.Name, REPORT_WORDS)
+                and not inCharacter(inst) then
+                local parentName = inst.Parent and inst.Parent.Name or "?"
+                local key = inst.Name .. "|" .. inst.ClassName .. "|" .. parentName
+                if not seen[key] then
+                    seen[key] = true
+                    lines[#lines + 1] = inst.Name .. " [" .. inst.ClassName .. "] em " .. parentName
+                    if not seen["n|" .. inst.Name] then
+                        seen["n|" .. inst.Name] = true
+                        names[#names + 1] = inst.Name
+                    end
+                end
+            end
+            if i % 4000 == 0 then
+                task.wait()
+            end
+        end
+
+        for i = 1, min(#lines, 150) do
+            print("[Buk Scan] " .. lines[i])
+        end
+
+        if #lines == 0 then
+            notify("Não achei nada parecido com bola ou marcação. Entre numa partida e tente de novo.", "x", 5)
+            return
+        end
+
+        local copied = false
+        if type(setclipboard) == "function" then
+            copied = pcall(setclipboard, table.concat(lines, "\n", 1, min(#lines, 150)))
+        end
+
+        local preview = {}
+        for i = 1, min(#names, 6) do
+            preview[#preview + 1] = names[i]
+        end
+
+        notify(
+            #lines .. " objetos: " .. table.concat(preview, ", ")
+                .. (copied and " (lista completa copiada)" or " (veja o console F9)"),
+            "check",
+            8
+        )
+    end)
+end
+
+--------------------------------------------------------------------
 -- Unload (limpa tudo e fecha a janela)
 --------------------------------------------------------------------
 local function Cleanup()
     Ready              = false
     State.CFrameSpeed  = false
     State.InfiniteJump = false
+    Racket.AutoHit     = false
     ESP.Name, ESP.Health, ESP.Tracer, ESP.Box = false, false, false, false
 
     for _, conn in ipairs(Connections) do
@@ -1033,7 +1537,148 @@ OptionsSection:Colorpicker({
     end,
 })
 
--- Aba 4: Settings --------------------------------------------------
+-- Aba: Racket (Racket Rivals) ---------------------------------------
+local RacketTab = Window:Tab({
+    Title = "Racket",
+    Icon  = "zap",
+})
+
+local HitSection = newSection(RacketTab, "Auto Hit", "zap")
+
+HitSection:Toggle({
+    Title = "Auto Hit",
+    Desc  = "Quando a bola está caindo, teleporta para onde ela vai cair e rebate",
+    Flag  = "Racket_AutoHit",
+    Value = false,
+    Callback = function(state)
+        Racket.AutoHit = state
+        if state then
+            Racket.LastScan = -math.huge
+        end
+        queueSave()
+    end,
+})
+
+HitSection:Toggle({
+    Title = "Auto Swing",
+    Desc  = "Dá a batida sozinho quando a bola chega perto",
+    Flag  = "Racket_AutoSwing",
+    Value = true,
+    Callback = function(state)
+        Racket.AutoSwing = state
+        queueSave()
+    end,
+})
+
+HitSection:Slider({
+    Title = "Teleport Height",
+    Desc  = "Teleporta quando a bola descer abaixo dessa altura (studs)",
+    Flag  = "Racket_TpHeight",
+    Step  = 1,
+    Value = { Min = 5, Max = 80, Default = 30 },
+    Callback = function(value)
+        Racket.TpHeight = value
+        queueSave()
+    end,
+})
+
+HitSection:Slider({
+    Title = "Swing Range",
+    Desc  = "Distância da bola para dar a batida (studs)",
+    Flag  = "Racket_SwingRange",
+    Step  = 1,
+    Value = { Min = 4, Max = 25, Default = 12 },
+    Callback = function(value)
+        Racket.SwingRange = value
+        queueSave()
+    end,
+})
+
+HitSection:Slider({
+    Title = "Max Distance",
+    Desc  = "Ignora bola que cai mais longe que isso (lado do adversário)",
+    Flag  = "Racket_MaxDist",
+    Step  = 5,
+    Value = { Min = 10, Max = 200, Default = 60 },
+    Callback = function(value)
+        Racket.MaxDist = value
+        queueSave()
+    end,
+})
+
+local SwingSection = newSection(RacketTab, "Swing", "mouse-pointer-click")
+
+SwingSection:Dropdown({
+    Title  = "Swing Method",
+    Desc   = "Auto usa a raquete equipada e, se não houver, clica na tela",
+    Flag   = "Racket_SwingMode",
+    Values = { "Auto", "Tool", "Click", "Key" },
+    Value  = "Auto",
+    Callback = function(option)
+        if type(option) == "table" then
+            option = option.Title or option[1]
+        end
+        if type(option) == "string" then
+            Racket.SwingMode = option
+        end
+        queueSave()
+    end,
+})
+
+SwingSection:Input({
+    Title       = "Swing Key",
+    Desc        = "Tecla usada quando o método é Key (ex: E, F, Space)",
+    Flag        = "Racket_SwingKey",
+    Value       = "E",
+    Placeholder = "E",
+    Callback = function(text)
+        Racket.SwingKey = tostring(text or "")
+        queueSave()
+    end,
+})
+
+local DetectSection = newSection(RacketTab, "Detection", "search")
+
+DetectSection:Input({
+    Title       = "Ball Name",
+    Desc        = "Nome da bola no jogo. Vazio = detecta sozinho. Pode separar por vírgula",
+    Flag        = "Racket_BallName",
+    Value       = "",
+    Placeholder = "ex: Shuttle",
+    Callback = function(text)
+        local list = parseNames(text)
+        if #list == 0 then
+            list = DEFAULT_BALL_WORDS
+        end
+        Racket.BallList = list
+        resetDetection()
+        queueSave()
+    end,
+})
+
+DetectSection:Input({
+    Title       = "Marker Name",
+    Desc        = "Nome da marcação que mostra onde a bola cai. Vazio = calcula a queda",
+    Flag        = "Racket_MarkerName",
+    Value       = "",
+    Placeholder = "ex: Landing",
+    Callback = function(text)
+        Racket.MarkerList = parseNames(text)
+        resetDetection()
+        queueSave()
+    end,
+})
+
+DetectSection:Button({
+    Title = "Scan Objects",
+    Desc  = "Lista objetos com cara de bola ou marcação (copia a lista, se der)",
+    Icon  = "scan-search",
+    Callback = function()
+        scanReport()
+    end,
+})
+
+-- Aba 5: Settings --------------------------------------------------
 local SettingsTab = Window:Tab({
     Title = "Settings",
     Icon  = "settings",
